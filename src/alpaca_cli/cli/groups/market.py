@@ -26,10 +26,19 @@ def clock() -> None:
     try:
         clock = client.get_clock()
         rows = [
-            ["Timestamp", clock.timestamp.strftime("%Y-%m-%d %H:%M:%S %Z")],
+            [
+                "Timestamp",
+                clock.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
+            ],
             ["Is Open", "[green]Yes[/green]" if clock.is_open else "[red]No[/red]"],
-            ["Next Open", clock.next_open.strftime("%Y-%m-%d %H:%M:%S %Z")],
-            ["Next Close", clock.next_close.strftime("%Y-%m-%d %H:%M:%S %Z")],
+            [
+                "Next Open",
+                clock.next_open.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
+            ],
+            [
+                "Next Close",
+                clock.next_close.astimezone().strftime("%Y-%m-%d %H:%M:%S %Z"),
+            ],
         ]
         print_table("Market Clock", ["Metric", "Value"], rows)
     except Exception as e:
@@ -37,8 +46,8 @@ def clock() -> None:
 
 
 @market.command()
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
+@click.option("--start", help="Start date (YYYY-MM-DD) [UTC]")
+@click.option("--end", help="End date (YYYY-MM-DD) [UTC]")
 def calendar(start: Optional[str], end: Optional[str]) -> None:
     """Get market calendar."""
     logger.info("Fetching market calendar...")
@@ -71,8 +80,8 @@ def calendar(start: Optional[str], end: Optional[str]) -> None:
 
 @market.command()
 @click.option("--symbols", help="Comma-separated symbols")
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
+@click.option("--start", help="Start date (YYYY-MM-DD) [UTC]")
+@click.option("--end", help="End date (YYYY-MM-DD) [UTC]")
 @click.option(
     "--limit", default=10, help="Limit number of news items (default 10, max 50)"
 )
@@ -116,7 +125,7 @@ def news(
 
             rows.append(
                 [
-                    n.created_at.strftime("%Y-%m-%d %H:%M"),
+                    n.created_at.astimezone().strftime("%Y-%m-%d %H:%M"),
                     headline,
                     n.source,
                     ", ".join(n.symbols) if n.symbols else "",

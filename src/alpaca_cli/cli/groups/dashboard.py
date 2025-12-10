@@ -53,8 +53,11 @@ def get_market_status_panel():
     next_label = "Opens" if not clock.is_open else "Closes"
 
     # Calculate time until next session
-    now = datetime.now(next_session.tzinfo)
-    time_left = next_session - now
+    # next_session is UTC, convert to local
+    next_session_local = next_session.astimezone()
+    now_local = datetime.now().astimezone()
+
+    time_left = next_session_local - now_local
     hours, remainder = divmod(time_left.seconds, 3600)
     minutes, _ = divmod(remainder, 60)
 
@@ -62,7 +65,7 @@ def get_market_status_panel():
     text.append("Market is ", style="bold white")
     text.append(status_text, style=f"bold {status_color}")
     text.append(f" • Next Session {next_label}: ", style="dim white")
-    text.append(f"{next_session.strftime('%H:%M %Z')}", style="cyan")
+    text.append(f"{next_session_local.strftime('%H:%M %Z')}", style="cyan")
     text.append(f" (in {hours}h {minutes}m)", style="dim cyan")
 
     return Panel(
@@ -215,7 +218,7 @@ def get_news_panel():
 
         for n in news_items:
             # Access attributes directly, News object is pydantic model
-            time_str = n.created_at.strftime("%H:%M")
+            time_str = n.created_at.astimezone().strftime("%H:%M")
             headline = n.headline
             table.add_row(time_str, headline)
 

@@ -92,7 +92,7 @@ def positions() -> None:
 @click.option(
     "--timeframe", default="1D", help="Resolution of data (1Min, 5Min, 15Min, 1H, 1D)"
 )
-@click.option("--date_end", help="End date (YYYY-MM-DD)")
+@click.option("--date_end", help="End date (YYYY-MM-DD) [UTC]")
 @click.option("--extended", is_flag=True, help="Include extended hours")
 def history(period: str, timeframe: str, date_end: str, extended: bool) -> None:
     """Show portfolio history."""
@@ -159,3 +159,81 @@ def history(period: str, timeframe: str, date_end: str, extended: bool) -> None:
     # Or just print all.
 
     print_table("Portfolio History", ["Time", "Equity", "P/L ($)", "P/L (%)"], rows)
+
+
+@account.command()
+def weights() -> None:
+    """Show portfolio weights."""
+    logger.info("Fetching portfolio weights...")
+    client = get_trading_client()
+
+    try:
+        account = client.get_account()
+        positions = client.get_all_positions()
+    except Exception as e:
+        logger.error(f"Failed to fetch data: {e}")
+        return
+
+    total_equity = float(account.equity)
+    if total_equity == 0:
+        logger.warning("Account equity is zero.")
+        return
+
+    rows: List[List[Any]] = []
+
+    # Calculate weights for positions
+    for pos in positions:
+        market_value = float(pos.market_value)
+        weight = (market_value / total_equity) * 100
+
+        # Color coding for weight
+        # Long positions are positive weight, short are negative in terms of exposure,
+        # but usually weights are presented as % of equity allocated.
+        # Short market value is negative in API response? Let's check or assume positive magnitude.
+        # In Alpaca API, market_value is positive even for shorts, but side is 'short'.
+        # However, for weight distribution, we might want to show direction.
+        # But 'market_value' field string usually parses to positive float.
+        # Let's check side.
+
+        is_short = pos.side == "short"
+        if is_short:
+            # If short, maybe we want to show negative weight or just indicate short?
+            # Standard convention: Long +%, Short -%
+            weight = -weight
+
+        weight_color = "green" if weight >= 0 else "red"
+
+        rows.append(
+            [
+                pos.symbol,
+                pos.side.upper(),
+                pos.qty,
+                format_currency(pos.current_price),
+                format_currency(pos.market_value),
+                f"[{weight_color}]{weight:.2f}%[/{weight_color}]",
+            ]
+        )
+
+    # Calculate cash weight
+    cash = float(account.cash)
+    cash_weight = (cash / total_equity) * 100
+    rows.append(
+        [
+            "CASH",
+            "-",
+            "-",
+            "-",
+            format_currency(cash),
+            f"[bold blue]{cash_weight:.2f}%[/bold blue]",
+        ]
+    )
+
+    # Sort by weight (descending absolute value maybe? or just descending)
+    # Let's sort by weight descending
+    rows.sort(key=lambda x: float(x[5].split("]")[1].split("%")[0]), reverse=True)
+
+    print_table(
+        f"Portfolio Weights (Total Equity: {format_currency(total_equity)})",
+        ["Symbol", "Side", "Qty", "Price", "Value", "Weight"],
+        rows,
+    )

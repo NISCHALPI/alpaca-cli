@@ -145,8 +145,8 @@ def get_timeframe_delta(tf_str: str, limit: int) -> timedelta:
 @click.option(
     "--timeframe", default="1Day", help="Timeframe (1Min, 1Hour, 1Day, 1Week, 1Month)"
 )
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
+@click.option("--start", help="Start date (YYYY-MM-DD) [UTC]")
+@click.option("--end", help="End date (YYYY-MM-DD) [UTC]")
 @click.option("--limit", default=5, help="Number of bars")
 @click.option(
     "--adjustment",
@@ -357,8 +357,8 @@ def stock_stream(symbols: str, feed: str) -> None:
 @click.option(
     "--timeframe", default="1Day", help="Timeframe (1Min, 1Hour, 1Day, 1Week, 1Month)"
 )
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
+@click.option("--start", help="Start date (YYYY-MM-DD) [UTC]")
+@click.option("--end", help="End date (YYYY-MM-DD) [UTC]")
 @click.option("--limit", default=5, help="Number of bars")
 @click.option("--sort", type=click.Choice(["asc", "desc"]), help="Sort direction")
 def crypto_history(
