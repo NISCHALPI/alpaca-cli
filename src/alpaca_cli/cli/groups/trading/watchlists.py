@@ -1,3 +1,5 @@
+"""Watchlists commands - CRUD operations for watchlists."""
+
 import rich_click as click
 from typing import Optional, List, Any
 from alpaca.trading.requests import CreateWatchlistRequest, UpdateWatchlistRequest
@@ -5,81 +7,71 @@ from alpaca_cli.core.client import get_trading_client
 from alpaca_cli.cli.utils import print_table, format_currency
 from alpaca_cli.logger.logger import get_logger
 
-logger = get_logger("watchlist")
-
-
-@click.group()
-def watchlist() -> None:
-    """Manage watchlists."""
-    pass
+logger = get_logger("trading.watchlists")
 
 
 def get_watchlist_id_by_name_or_id(name_or_id: str) -> Optional[str]:
     """Resolve watchlist ID from name or ID."""
     client = get_trading_client()
     try:
-        # Try fetching by ID first if it looks like a UUID
-        if len(name_or_id) == 36:  # Simple UUID length check
+        if len(name_or_id) == 36:  # UUID length
             try:
                 wl = client.get_watchlist_by_id(name_or_id)
                 return wl.id
             except Exception:
-                pass  # Not found by ID, try name
-
-        # Fetch all and search by name
+                pass
         watchlists = client.get_watchlists()
         for wl in watchlists:
             if wl.name == name_or_id or wl.id == name_or_id:
                 return wl.id
-
         return None
     except Exception as e:
         logger.error(f"Error resolving watchlist: {e}")
         return None
 
 
-@watchlist.command("list")
+@click.group()
+def watchlists() -> None:
+    """Watchlist management (list, show, create, update, delete)."""
+    pass
+
+
+@watchlists.command("list")
 def list_watchlists() -> None:
-    """List all watchlists."""
+    """Get all watchlists."""
     logger.info("Fetching watchlists...")
     client = get_trading_client()
     try:
-        watchlists = client.get_watchlists()
-        if not watchlists:
+        wl_list = client.get_watchlists()
+        if not wl_list:
             logger.info("No watchlists found.")
             return
 
         rows: List[List[Any]] = []
-        for wl in watchlists:
-            assets_count = len(wl.assets) if wl.assets else 0
+        for wl in wl_list:
             rows.append(
                 [
                     str(wl.created_at.strftime("%Y-%m-%d")),
                     wl.id,
                     wl.name,
-                    str(assets_count),
+                    str(len(wl.assets) if wl.assets else 0),
                 ]
             )
 
-        print_table(
-            "Watchlists",
-            ["Created", "ID", "Name", "Assets"],
-            rows,
-        )
+        print_table("Watchlists", ["Created", "ID", "Name", "Assets"], rows)
     except Exception as e:
         logger.error(f"Failed to list watchlists: {e}")
 
 
-@watchlist.command("show")
+@watchlists.command("show")
 @click.argument("name_or_id")
 def show_watchlist(name_or_id: str) -> None:
-    """Show details of a specific watchlist."""
+    """Get a watchlist by ID or name."""
     wl_id = get_watchlist_id_by_name_or_id(name_or_id)
     if not wl_id:
         logger.error(f"Watchlist '{name_or_id}' not found.")
         return
 
-    logger.info(f"Fetching watchlist {name_or_id}...")
     client = get_trading_client()
     try:
         wl = client.get_watchlist_by_id(wl_id)
@@ -92,59 +84,41 @@ def show_watchlist(name_or_id: str) -> None:
                 ["Name", wl.name],
                 ["Created", str(wl.created_at)],
                 ["Updated", str(wl.updated_at)],
-                ["Account ID", wl.account_id],
             ],
         )
 
         if wl.assets:
-            # Fetch current positions to cross-reference
             positions_map = {}
             try:
                 positions = client.get_all_positions()
-                for pos in positions:
-                    positions_map[pos.symbol] = pos
+                positions_map = {pos.symbol: pos for pos in positions}
             except Exception:
-                pass  # Ignore errors fetching positions, just show empty columns
+                pass
 
             asset_rows = []
             for asset in wl.assets:
                 pos = positions_map.get(asset.symbol)
-
                 qty = str(pos.qty) if pos else "-"
-                avg_entry = format_currency(pos.avg_entry_price) if pos else "-"
-                current_price = format_currency(pos.current_price) if pos else "-"
-
+                current = format_currency(pos.current_price) if pos else "-"
                 pl_str = "-"
                 if pos:
-                    pl_percent = float(pos.unrealized_plpc) * 100
-                    pl_color = "green" if pl_percent >= 0 else "red"
-                    pl_str = f"[{pl_color}]{format_currency(pos.unrealized_pl)} ({pl_percent:.2f}%)[/{pl_color}]"
-
-                asset_rows.append(
-                    [
-                        asset.symbol,
-                        asset.name,
-                        asset.status.name,
-                        qty,
-                        avg_entry,
-                        current_price,
-                        pl_str,
-                    ]
-                )
+                    pl_pct = float(pos.unrealized_plpc) * 100
+                    color = "green" if pl_pct >= 0 else "red"
+                    pl_str = f"[{color}]{format_currency(pos.unrealized_pl)} ({pl_pct:.2f}%)[/{color}]"
+                asset_rows.append([asset.symbol, asset.name, qty, current, pl_str])
 
             print_table(
                 f"Assets in {wl.name}",
-                ["Symbol", "Name", "Status", "Qty", "Avg Entry", "Current", "P/L"],
+                ["Symbol", "Name", "Qty", "Price", "P/L"],
                 asset_rows,
             )
         else:
             logger.info("This watchlist is empty.")
-
     except Exception as e:
         logger.error(f"Failed to show watchlist: {e}")
 
 
-@watchlist.command("create")
+@watchlists.command("create")
 @click.argument("name")
 @click.argument("symbols", nargs=-1)
 def create_watchlist(name: str, symbols: tuple) -> None:
@@ -154,17 +128,17 @@ def create_watchlist(name: str, symbols: tuple) -> None:
     try:
         req = CreateWatchlistRequest(name=name, symbols=list(symbols))
         wl = client.create_watchlist(req)
-        logger.info(f"Watchlist '{wl.name}' created successfully (ID: {wl.id}).")
+        logger.info(f"Watchlist '{wl.name}' created (ID: {wl.id}).")
     except Exception as e:
         logger.error(f"Failed to create watchlist: {e}")
 
 
-@watchlist.command("update")
+@watchlists.command("update")
 @click.argument("name_or_id")
-@click.option("--name", help="New name for the watchlist")
+@click.option("--name", "new_name", help="New name for the watchlist")
 @click.option("--symbols", help="Comma-separated list of symbols to REPLACE items")
 def update_watchlist(
-    name_or_id: str, name: Optional[str], symbols: Optional[str]
+    name_or_id: str, new_name: Optional[str], symbols: Optional[str]
 ) -> None:
     """Update a watchlist (rename or replace assets)."""
     wl_id = get_watchlist_id_by_name_or_id(name_or_id)
@@ -172,18 +146,17 @@ def update_watchlist(
         logger.error(f"Watchlist '{name_or_id}' not found.")
         return
 
-    logger.info(f"Updating watchlist {name_or_id}...")
     client = get_trading_client()
     try:
         symbol_list = symbols.split(",") if symbols else None
-        req = UpdateWatchlistRequest(name=name, symbols=symbol_list)
+        req = UpdateWatchlistRequest(name=new_name, symbols=symbol_list)
         wl = client.update_watchlist_by_id(wl_id, req)
-        logger.info(f"Watchlist '{wl.name}' updated successfully.")
+        logger.info(f"Watchlist '{wl.name}' updated.")
     except Exception as e:
         logger.error(f"Failed to update watchlist: {e}")
 
 
-@watchlist.command("add")
+@watchlists.command("add")
 @click.argument("name_or_id")
 @click.argument("symbol")
 def add_asset(name_or_id: str, symbol: str) -> None:
@@ -193,16 +166,15 @@ def add_asset(name_or_id: str, symbol: str) -> None:
         logger.error(f"Watchlist '{name_or_id}' not found.")
         return
 
-    logger.info(f"Adding {symbol} to watchlist {name_or_id}...")
     client = get_trading_client()
     try:
-        client.add_asset_to_watchlist_by_id(wl_id, symbol)
-        logger.info(f"Asset {symbol} added to watchlist.")
+        client.add_asset_to_watchlist_by_id(wl_id, symbol.upper())
+        logger.info(f"Asset {symbol.upper()} added to watchlist.")
     except Exception as e:
         logger.error(f"Failed to add asset: {e}")
 
 
-@watchlist.command("remove")
+@watchlists.command("remove")
 @click.argument("name_or_id")
 @click.argument("symbol")
 def remove_asset(name_or_id: str, symbol: str) -> None:
@@ -212,16 +184,15 @@ def remove_asset(name_or_id: str, symbol: str) -> None:
         logger.error(f"Watchlist '{name_or_id}' not found.")
         return
 
-    logger.info(f"Removing {symbol} from watchlist {name_or_id}...")
     client = get_trading_client()
     try:
-        client.remove_asset_from_watchlist_by_id(wl_id, symbol)
-        logger.info(f"Asset {symbol} removed from watchlist.")
+        client.remove_asset_from_watchlist_by_id(wl_id, symbol.upper())
+        logger.info(f"Asset {symbol.upper()} removed from watchlist.")
     except Exception as e:
         logger.error(f"Failed to remove asset: {e}")
 
 
-@watchlist.command("delete")
+@watchlists.command("delete")
 @click.argument("name_or_id")
 def delete_watchlist(name_or_id: str) -> None:
     """Delete a watchlist."""
@@ -230,10 +201,9 @@ def delete_watchlist(name_or_id: str) -> None:
         logger.error(f"Watchlist '{name_or_id}' not found.")
         return
 
-    logger.info(f"Deleting watchlist {name_or_id}...")
     client = get_trading_client()
     try:
         client.delete_watchlist_by_id(wl_id)
-        logger.info(f"Watchlist deleted successfully.")
+        logger.info("Watchlist deleted.")
     except Exception as e:
         logger.error(f"Failed to delete watchlist: {e}")

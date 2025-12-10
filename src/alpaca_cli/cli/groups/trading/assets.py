@@ -1,3 +1,5 @@
+"""Assets commands - Get All Assets, Get Asset."""
+
 import rich_click as click
 from typing import Optional, List, Any
 from alpaca.trading.requests import GetAssetsRequest
@@ -6,12 +8,12 @@ from alpaca_cli.core.client import get_trading_client
 from alpaca_cli.cli.utils import print_table
 from alpaca_cli.logger.logger import get_logger
 
-logger = get_logger("assets")
+logger = get_logger("trading.assets")
 
 
 @click.group()
 def assets() -> None:
-    """Manage and view tradable assets."""
+    """Asset lookup (list, get)."""
     pass
 
 
@@ -19,13 +21,13 @@ def assets() -> None:
 @click.option(
     "--status",
     type=click.Choice(["active", "inactive"], case_sensitive=False),
-    help="Filter by asset status",
+    help="Filter by status",
 )
 @click.option(
     "--asset-class",
     "asset_class",
     type=click.Choice(["us_equity", "crypto", "us_option"], case_sensitive=False),
-    help="Filter by asset class",
+    help="Filter by class",
 )
 @click.option(
     "--exchange",
@@ -34,17 +36,27 @@ def assets() -> None:
     ),
     help="Filter by exchange",
 )
+@click.option(
+    "--attributes",
+    help="Comma-separated attributes (e.g., fractional,ptp_no_exception)",
+)
 def list_assets(
-    status: Optional[str], asset_class: Optional[str], exchange: Optional[str]
+    status: Optional[str],
+    asset_class: Optional[str],
+    exchange: Optional[str],
+    attributes: Optional[str],
 ) -> None:
-    """List assets."""
+    """Get all tradable assets."""
     logger.info("Fetching assets...")
     client = get_trading_client()
+
+    attr_list = attributes.split(",") if attributes else None
 
     req = GetAssetsRequest(
         status=AssetStatus(status.lower()) if status else None,
         asset_class=AssetClass(asset_class.lower()) if asset_class else None,
         exchange=AssetExchange(exchange.upper()) if exchange else None,
+        attributes=attr_list,
     )
 
     try:
@@ -55,34 +67,29 @@ def list_assets(
             return
 
         rows: List[List[Any]] = []
-        for asset in assets_list:
+        for asset in assets_list[:100]:  # Limit to 100 for display
             rows.append(
                 [
                     asset.symbol,
-                    asset.name,
+                    asset.name[:30] + "..." if len(asset.name) > 30 else asset.name,
                     asset.exchange.name,
                     asset.asset_class.name,
                     "Active" if asset.status == AssetStatus.ACTIVE else "Inactive",
-                    str(asset.tradable),
-                    str(asset.marginable),
-                    str(asset.shortable),
+                    "Yes" if asset.tradable else "No",
+                    "Yes" if asset.fractionable else "No",
                 ]
             )
 
         print_table(
             "Assets",
-            [
-                "Symbol",
-                "Name",
-                "Exchange",
-                "Class",
-                "Status",
-                "Tradable",
-                "Marginable",
-                "Shortable",
-            ],
+            ["Symbol", "Name", "Exchange", "Class", "Status", "Tradable", "Fractional"],
             rows,
         )
+        if len(assets_list) > 100:
+            logger.info(
+                f"Showing 100 of {len(assets_list)} assets. Use filters to narrow down."
+            )
+
     except Exception as e:
         logger.error(f"Failed to list assets: {e}")
 
@@ -98,7 +105,7 @@ def get_asset(symbol_or_id: str) -> None:
         asset = client.get_asset(symbol_or_id)
 
         rows = [
-            ["ID", asset.id],
+            ["ID", str(asset.id)],
             ["Symbol", asset.symbol],
             ["Name", asset.name],
             ["Exchange", asset.exchange.name],
@@ -113,8 +120,12 @@ def get_asset(symbol_or_id: str) -> None:
 
         if hasattr(asset, "min_order_size") and asset.min_order_size:
             rows.append(["Min Order Size", str(asset.min_order_size)])
+        if hasattr(asset, "min_trade_increment") and asset.min_trade_increment:
+            rows.append(["Min Trade Increment", str(asset.min_trade_increment)])
+        if hasattr(asset, "price_increment") and asset.price_increment:
+            rows.append(["Price Increment", str(asset.price_increment)])
 
-        print_table(f"Asset Details: {asset.symbol}", ["Property", "Value"], rows)
+        print_table(f"Asset: {asset.symbol}", ["Property", "Value"], rows)
 
     except Exception as e:
         logger.error(f"Failed to get asset: {e}")
