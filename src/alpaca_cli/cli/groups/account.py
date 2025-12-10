@@ -278,3 +278,128 @@ def weights() -> None:
         ["Symbol", "Side", "Qty", "Price", "Value", "Weight"],
         rows,
     )
+
+
+# --- CLOSE POSITION ---
+@account.command()
+@click.argument("symbol", required=False)
+@click.option("--all", "close_all", is_flag=True, help="Close ALL open positions")
+@click.option("--qty", type=float, help="Partial close: number of shares to sell")
+@click.option("--percentage", type=float, help="Partial close: percentage of position (0-100)")
+@click.option("--cancel-orders", is_flag=True, help="Cancel open orders before closing")
+def close(
+    symbol: Optional[str],
+    close_all: bool,
+    qty: Optional[float],
+    percentage: Optional[float],
+    cancel_orders: bool,
+) -> None:
+    """Close position(s).
+
+    Examples:
+        alpaca-cli account close AAPL          # Close entire AAPL position
+        alpaca-cli account close AAPL --qty 10 # Sell 10 shares of AAPL
+        alpaca-cli account close --all         # Close all positions
+    """
+    from alpaca.trading.requests import ClosePositionRequest
+
+    client = get_trading_client()
+
+    if close_all:
+        logger.info("Closing ALL open positions...")
+        try:
+            responses = client.close_all_positions(cancel_orders=cancel_orders)
+            if not responses:
+                logger.info("No positions to close.")
+                return
+            for resp in responses:
+                if resp.status == 200:
+                    logger.info(f"Closed position: {resp.symbol}")
+                else:
+                    logger.error(f"Failed to close {resp.symbol}: {resp.body}")
+        except Exception as e:
+            logger.error(f"Failed to close all positions: {e}")
+        return
+
+    if not symbol:
+        logger.error("Must specify SYMBOL or --all flag")
+        return
+
+    logger.info(f"Closing position for {symbol.upper()}...")
+
+    try:
+        req = None
+        if qty:
+            req = ClosePositionRequest(qty=str(qty))
+        elif percentage:
+            req = ClosePositionRequest(percentage=str(percentage / 100))
+
+        order = client.close_position(symbol.upper(), close_options=req)
+        logger.info(f"Position close order submitted: {order.id}")
+        logger.info(f"Side: {order.side.name}, Qty: {order.qty}, Status: {order.status.name}")
+    except Exception as e:
+        logger.error(f"Failed to close position: {e}")
+
+
+
+# --- ACCOUNT CONFIG ---
+@account.command("config")
+@click.option("--dtbp-check", type=click.Choice(["both", "entry", "exit"]), help="Day trade buying power check")
+@click.option("--trade-confirm", type=click.Choice(["all", "none"]), help="Trade confirmation emails")
+@click.option("--suspend-trade/--resume-trade", default=None, help="Suspend/resume trading")
+@click.option("--shorting/--no-shorting", default=None, help="Enable/disable shorting")
+@click.option("--fractional/--no-fractional", default=None, help="Enable/disable fractional trading")
+def config(
+    dtbp_check: Optional[str],
+    trade_confirm: Optional[str],
+    suspend_trade: Optional[bool],
+    shorting: Optional[bool],
+    fractional: Optional[bool],
+) -> None:
+    """Get or update account configuration."""
+    client = get_trading_client()
+
+    # If no options provided, show current config
+    if all(x is None for x in [dtbp_check, trade_confirm, suspend_trade, shorting, fractional]):
+        logger.info("Fetching account configuration...")
+        try:
+            cfg = client.get_account_configurations()
+            rows = [
+                ["DTBP Check", cfg.dtbp_check.value if cfg.dtbp_check else "-"],
+                ["Trade Confirm Email", cfg.trade_confirm_email.value if cfg.trade_confirm_email else "-"],
+                ["Suspend Trade", str(cfg.suspend_trade)],
+                ["No Shorting", str(cfg.no_shorting)],
+                ["Fractional Trading", str(cfg.fractional_trading)],
+                ["Max Margin Multiplier", str(cfg.max_margin_multiplier)],
+                ["PDT Check", cfg.pdt_check.value if cfg.pdt_check else "-"],
+                ["PTP No Exception", str(cfg.ptp_no_exception_entry)],
+            ]
+            print_table("Account Configuration", ["Setting", "Value"], rows)
+        except Exception as e:
+            logger.error(f"Failed to get config: {e}")
+        return
+
+    # Update config
+    logger.info("Updating account configuration...")
+    try:
+        from alpaca.trading.requests import AccountConfigurationRequest
+
+        req = AccountConfigurationRequest(
+            dtbp_check=dtbp_check,
+            trade_confirm_email=trade_confirm,
+            suspend_trade=suspend_trade,
+            no_shorting=not shorting if shorting is not None else None,
+            fractional_trading=fractional,
+        )
+        cfg = client.set_account_configurations(req)
+        logger.info("Account configuration updated successfully.")
+        
+        rows = [
+            ["DTBP Check", cfg.dtbp_check.value if cfg.dtbp_check else "-"],
+            ["Suspend Trade", str(cfg.suspend_trade)],
+            ["No Shorting", str(cfg.no_shorting)],
+            ["Fractional Trading", str(cfg.fractional_trading)],
+        ]
+        print_table("Updated Configuration", ["Setting", "Value"], rows)
+    except Exception as e:
+        logger.error(f"Failed to update config: {e}")

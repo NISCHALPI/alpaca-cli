@@ -508,3 +508,219 @@ def crypto_stream(symbols: str) -> None:
         logger.info("Stream stopped.")
     except Exception as e:
         logger.error(f"Stream error: {e}")
+
+
+# --- SCREENERS ---
+@data.group()
+def screeners() -> None:
+    """Market screeners (movers, most actives)."""
+    pass
+
+
+@screeners.command("movers")
+@click.option(
+    "--market",
+    type=click.Choice(["stocks", "crypto"], case_sensitive=False),
+    default="stocks",
+    help="Market type",
+)
+@click.option("--top", default=10, help="Number of movers to show")
+def movers(market: str, top: int) -> None:
+    """Get top market movers (gainers/losers)."""
+    from alpaca.data.historical.screener import ScreenerClient
+    from alpaca.data.requests import MarketMoversRequest
+
+    config.validate()
+    logger.info(f"Fetching {market} movers...")
+
+    try:
+        client = ScreenerClient(config.API_KEY, config.API_SECRET)
+        req = MarketMoversRequest(top=top)
+        result = client.get_market_movers(req)
+        
+        if not result or not result.gainers:
+            logger.info("No movers data found.")
+            return
+
+        # Gainers
+        gainer_rows = []
+        for m in result.gainers[:top]:
+            gainer_rows.append([
+                m.symbol,
+                format_currency(m.price) if m.price else "-",
+                f"[green]+{m.percent_change:.2f}%[/green]" if m.percent_change else "-",
+                format_currency(m.change) if m.change else "-",
+            ])
+
+        print_table("Top Gainers", ["Symbol", "Price", "% Change", "$ Change"], gainer_rows)
+
+        # Losers
+        if result.losers:
+            loser_rows = []
+            for m in result.losers[:top]:
+                loser_rows.append([
+                    m.symbol,
+                    format_currency(m.price) if m.price else "-",
+                    f"[red]{m.percent_change:.2f}%[/red]" if m.percent_change else "-",
+                    format_currency(m.change) if m.change else "-",
+                ])
+            print_table("Top Losers", ["Symbol", "Price", "% Change", "$ Change"], loser_rows)
+
+    except Exception as e:
+        logger.error(f"Failed to get movers: {e}")
+
+
+@screeners.command("actives")
+@click.option(
+    "--by",
+    type=click.Choice(["volume", "trades"], case_sensitive=False),
+    default="volume",
+    help="Sort by volume or number of trades",
+)
+@click.option("--top", default=10, help="Number of stocks to show")
+def actives(by: str, top: int) -> None:
+    """Get most active stocks."""
+    from alpaca.data.historical.screener import ScreenerClient
+    from alpaca.data.requests import MostActivesRequest
+    from alpaca.data.enums import MostActivesBy
+
+    config.validate()
+    logger.info(f"Fetching most active stocks (by {by})...")
+
+    try:
+        client = ScreenerClient(config.API_KEY, config.API_SECRET)
+        
+        by_enum = MostActivesBy.VOLUME if by.lower() == "volume" else MostActivesBy.TRADES
+        req = MostActivesRequest(top=top, by=by_enum)
+        result = client.get_most_actives(req)
+        
+        if not result or not result.most_actives:
+            logger.info("No data found.")
+            return
+
+        rows = []
+        for stock in result.most_actives:
+            rows.append([
+                stock.symbol,
+                str(int(stock.volume)) if stock.volume else "-",
+                str(int(stock.trade_count)) if stock.trade_count else "-",
+            ])
+
+        print_table(f"Most Active ({by.upper()})", ["Symbol", "Volume", "Trades"], rows)
+
+    except Exception as e:
+        logger.error(f"Failed to get most actives: {e}")
+
+
+# --- ORDERBOOK ---
+@crypto.command("orderbook")
+@click.argument("symbol")
+def crypto_orderbook(symbol: str) -> None:
+    """Get crypto orderbook (bid/ask depth)."""
+    from alpaca.data.requests import CryptoLatestOrderbookRequest
+
+    config.validate()
+    symbol = symbol.upper()
+    logger.info(f"Fetching orderbook for {symbol}...")
+
+    try:
+        client = CryptoHistoricalDataClient(config.API_KEY, config.API_SECRET)
+        req = CryptoLatestOrderbookRequest(symbol_or_symbols=symbol)
+        result = client.get_crypto_latest_orderbook(req)
+
+        if not result or symbol not in result:
+            logger.info("No orderbook data found.")
+            return
+
+        orderbook = result[symbol]
+
+        # Bids
+        bid_rows = []
+        for bid in orderbook.bids[:10]:
+            bid_rows.append([format_currency(bid.price), str(bid.size)])
+        
+        print_table(f"{symbol} Bids", ["Price", "Size"], bid_rows)
+
+        # Asks
+        ask_rows = []
+        for ask in orderbook.asks[:10]:
+            ask_rows.append([format_currency(ask.price), str(ask.size)])
+        
+        print_table(f"{symbol} Asks", ["Price", "Size"], ask_rows)
+
+    except Exception as e:
+        logger.error(f"Failed to get orderbook: {e}")
+
+
+# --- CORPORATE ACTIONS ---
+@data.command("corporate-actions")
+@click.option("--symbols", help="Comma-separated symbols")
+@click.option(
+    "--types",
+    help="Comma-separated types (dividend, merger, spinoff, split)",
+)
+@click.option("--start", help="Start date (YYYY-MM-DD)")
+@click.option("--end", help="End date (YYYY-MM-DD)")
+@click.option("--limit", default=20, help="Max results")
+def corporate_actions(
+    symbols: Optional[str],
+    types: Optional[str],
+    start: Optional[str],
+    end: Optional[str],
+    limit: int,
+) -> None:
+    """Get corporate actions (dividends, splits, etc.)."""
+    from alpaca.data.historical.corporate_actions import CorporateActionsClient
+    from alpaca.data.requests import CorporateActionsRequest
+
+    config.validate()
+    logger.info("Fetching corporate actions...")
+
+    try:
+        client = CorporateActionsClient(config.API_KEY, config.API_SECRET)
+
+        symbol_list = symbols.upper().split(",") if symbols else None
+        type_list = types.lower().split(",") if types else None
+        start_dt = datetime.strptime(start, "%Y-%m-%d") if start else None
+        end_dt = datetime.strptime(end, "%Y-%m-%d") if end else None
+
+        req = CorporateActionsRequest(
+            symbols=symbol_list,
+            types=type_list,
+            start=start_dt,
+            end=end_dt,
+            limit=limit,
+        )
+
+        result = client.get_corporate_actions(req)
+
+        if not result or not result.data:
+            logger.info("No corporate actions found.")
+            return
+
+        rows = []
+        # Corporate actions data is in result.data dict with action types as keys
+        for action_type, actions in result.data.items():
+            if not actions:
+                continue
+            for action in actions:
+                rows.append([
+                    action_type,
+                    getattr(action, "symbol", getattr(action, "old_symbol", "-")),
+                    str(getattr(action, "ex_date", getattr(action, "effective_date", "-"))),
+                    str(getattr(action, "record_date", "-") if hasattr(action, "record_date") else "-"),
+                    str(getattr(action, "cash_amount", getattr(action, "new_rate", "-"))),
+                ])
+
+        if not rows:
+            logger.info("No corporate actions found.")
+            return
+
+        print_table(
+            "Corporate Actions",
+            ["Type", "Symbol", "Ex-Date", "Record Date", "Value"],
+            rows,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to get corporate actions: {e}")

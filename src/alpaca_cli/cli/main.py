@@ -7,6 +7,7 @@ from alpaca_cli.cli.groups.watchlist import watchlist
 from alpaca_cli.cli.groups.data import data
 from alpaca_cli.cli.groups.market import market
 from alpaca_cli.cli.groups.dashboard import dashboard
+from alpaca_cli.cli.groups.options import options
 from alpaca_cli.logger.logger import configure_logging
 
 # Use Rich markup for all help text
@@ -40,6 +41,7 @@ def cli(debug: bool) -> None:
 # Register main command groups
 cli.add_command(account)
 cli.add_command(trading)
+cli.add_command(options)
 cli.add_command(assets)
 cli.add_command(watchlist)
 cli.add_command(data)

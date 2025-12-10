@@ -684,6 +684,109 @@ def cancel(order_id: Optional[str], all: bool) -> None:
         logger.error("Please specify an Order ID or use --all.")
 
 
+# --- GET ORDER BY ID ---
+@trading.command("order")
+@click.argument("order_id")
+def get_order(order_id: str) -> None:
+    """Get order details by ID."""
+    logger.info(f"Fetching order {order_id}...")
+    client = get_trading_client()
+
+    try:
+        order = client.get_order_by_id(order_id)
+
+        rows = [
+            ["Order ID", str(order.id)],
+            ["Client Order ID", order.client_order_id or "-"],
+            ["Symbol", order.symbol],
+            ["Side", order.side.name],
+            ["Type", order.type.name],
+            ["Qty", str(order.qty)],
+            ["Filled Qty", str(order.filled_qty or 0)],
+            ["Limit Price", format_currency(order.limit_price) if order.limit_price else "-"],
+            ["Stop Price", format_currency(order.stop_price) if order.stop_price else "-"],
+            ["Filled Avg Price", format_currency(order.filled_avg_price) if order.filled_avg_price else "-"],
+            ["Status", order.status.name],
+            ["Time in Force", order.time_in_force.name],
+            ["Extended Hours", str(order.extended_hours)],
+            ["Created At", order.created_at.strftime("%Y-%m-%d %H:%M:%S") if order.created_at else "-"],
+            ["Submitted At", order.submitted_at.strftime("%Y-%m-%d %H:%M:%S") if order.submitted_at else "-"],
+            ["Filled At", order.filled_at.strftime("%Y-%m-%d %H:%M:%S") if order.filled_at else "-"],
+        ]
+
+        print_table(f"Order Details: {order.symbol}", ["Field", "Value"], rows)
+
+        # Show legs if bracket/OCO order
+        if order.legs:
+            logger.info(f"Order has {len(order.legs)} leg(s):")
+            leg_rows = []
+            for leg in order.legs:
+                leg_rows.append([
+                    str(leg.id)[:8] + "...",
+                    leg.symbol,
+                    leg.side.name,
+                    leg.type.name,
+                    str(leg.qty),
+                    leg.status.name,
+                ])
+            print_table("Order Legs", ["ID", "Symbol", "Side", "Type", "Qty", "Status"], leg_rows)
+
+    except Exception as e:
+        logger.error(f"Failed to get order: {e}")
+
+
+# --- MODIFY ORDER ---
+@trading.command("modify")
+@click.argument("order_id")
+@click.option("--qty", type=float, help="New quantity")
+@click.option("--limit", "limit_price", type=float, help="New limit price")
+@click.option("--stop", "stop_price", type=float, help="New stop price")
+@click.option("--trail", type=float, help="New trail price (for trailing stop)")
+@click.option("--tif", type=click.Choice(["day", "gtc", "ioc", "fok"]), help="New time in force")
+@click.option("--client-order-id", help="New client order ID")
+def modify(
+    order_id: str,
+    qty: Optional[float],
+    limit_price: Optional[float],
+    stop_price: Optional[float],
+    trail: Optional[float],
+    tif: Optional[str],
+    client_order_id: Optional[str],
+) -> None:
+    """Modify/replace an existing order.
+
+    Examples:
+        alpaca-cli trading modify ORDER_ID --qty 100
+        alpaca-cli trading modify ORDER_ID --limit 155.50
+        alpaca-cli trading modify ORDER_ID --qty 50 --limit 160
+    """
+    from alpaca.trading.requests import ReplaceOrderRequest
+
+    if all(x is None for x in [qty, limit_price, stop_price, trail, tif, client_order_id]):
+        logger.error("Must specify at least one modification (--qty, --limit, --stop, --trail, --tif)")
+        return
+
+    logger.info(f"Modifying order {order_id}...")
+    client = get_trading_client()
+
+    try:
+        req = ReplaceOrderRequest(
+            qty=qty,
+            limit_price=limit_price,
+            stop_price=stop_price,
+            trail=trail,
+            time_in_force=TimeInForce(tif) if tif else None,
+            client_order_id=client_order_id,
+        )
+
+        new_order = client.replace_order_by_id(order_id, req)
+        logger.info(f"Order modified successfully. New Order ID: {new_order.id}")
+        logger.info(f"Symbol: {new_order.symbol}, Qty: {new_order.qty}, Status: {new_order.status.name}")
+
+    except Exception as e:
+        logger.error(f"Failed to modify order: {e}")
+
+
 @trading.command()
 @click.argument("target_weights_path", type=click.Path(exists=True))
 @click.option(
@@ -957,3 +1060,96 @@ def rebalance(
             submit_order(req)
         except Exception as e:
             logger.error(f"Failed to submit order for {o['symbol']}: {e}")
+
+
+# --- TRADING STREAM ---
+@trading.command("stream")
+def trading_stream() -> None:
+    """Stream real-time order updates.
+    
+    Shows order fills, cancellations, and status changes in real-time.
+    Press Ctrl+C to stop.
+    """
+    import asyncio
+    from alpaca.trading.stream import TradingStream
+    from alpaca_cli.core.config import config
+    from rich.live import Live
+    from rich.table import Table
+    from rich import box
+
+    config.validate()
+    logger.info("Starting trading stream. Press Ctrl+C to stop...")
+
+    stream = TradingStream(config.API_KEY, config.API_SECRET, paper=config.IS_PAPER)
+
+    # Store recent events
+    events = []
+    MAX_EVENTS = 20
+
+    def create_table():
+        table = Table(title="[bold]Trading Stream[/bold]", box=box.ROUNDED)
+        table.add_column("Time", style="dim")
+        table.add_column("Event", style="cyan")
+        table.add_column("Symbol", style="yellow")
+        table.add_column("Side")
+        table.add_column("Qty")
+        table.add_column("Price")
+        table.add_column("Status", style="bold")
+        
+        for event in events[-MAX_EVENTS:]:
+            table.add_row(*event)
+        
+        return table
+
+    async def trade_update_handler(data):
+        """Handle trade update events."""
+        event = data.event
+        order = data.order
+        
+        # Format the event row
+        time_str = order.updated_at.strftime("%H:%M:%S") if order.updated_at else "-"
+        side_color = "green" if order.side.name == "BUY" else "red"
+        side_str = f"[{side_color}]{order.side.name}[/{side_color}]"
+        
+        status_color = "green" if order.status.name == "FILLED" else "yellow"
+        if order.status.name in ["CANCELED", "REJECTED", "EXPIRED"]:
+            status_color = "red"
+        status_str = f"[{status_color}]{order.status.name}[/{status_color}]"
+        
+        price_str = format_currency(order.filled_avg_price) if order.filled_avg_price else "-"
+        
+        events.append([
+            time_str,
+            event,
+            order.symbol,
+            side_str,
+            str(order.filled_qty or order.qty),
+            price_str,
+            status_str,
+        ])
+        
+        # Log to console as well
+        logger.info(f"{event}: {order.symbol} {order.side.name} {order.qty} @ {price_str} - {order.status.name}")
+
+    async def run_stream():
+        stream.subscribe_trade_updates(trade_update_handler)
+        
+        with Live(create_table(), refresh_per_second=2) as live:
+            async def update_view():
+                while True:
+                    live.update(create_table())
+                    await asyncio.sleep(0.5)
+            
+            view_task = asyncio.create_task(update_view())
+            
+            try:
+                await stream._run_forever()
+            finally:
+                view_task.cancel()
+
+    try:
+        asyncio.run(run_stream())
+    except KeyboardInterrupt:
+        logger.info("Trading stream stopped.")
+    except Exception as e:
+        logger.error(f"Stream error: {e}")
