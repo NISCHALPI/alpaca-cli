@@ -16,12 +16,14 @@ from alpaca.trading.enums import (
     OrderClass,
     QueryOrderStatus,
 )
-from alpaca_cli.core.client import get_trading_client
+from alpaca_cli.core.client import (
+    get_trading_client,
+    get_stock_data_client,
+    get_crypto_data_client,
+)
 from alpaca_cli.cli.utils import print_table, format_currency
 from alpaca_cli.logger.logger import get_logger
-from alpaca.data.historical import StockHistoricalDataClient, CryptoHistoricalDataClient
 from alpaca.data.requests import StockLatestQuoteRequest, CryptoLatestQuoteRequest
-from alpaca_cli.core.config import config
 
 logger = get_logger("trading")
 
@@ -84,7 +86,13 @@ def buy() -> None:
 
 @buy.command()
 @click.argument("symbol")
-@click.argument("qty", type=float)
+@click.argument("qty", type=float, required=False, default=None)
+@click.option(
+    "--notional",
+    type=float,
+    default=None,
+    help="Trade by dollar value instead of qty (for fractional shares)",
+)
 @click.option(
     "--tif",
     default="day",
@@ -101,19 +109,29 @@ def buy() -> None:
 @click.option("--stop-loss-limit", type=float, help="Stop Loss Limit Price (optional)")
 def market(
     symbol: str,
-    qty: float,
+    qty: Optional[float],
+    notional: Optional[float],
     tif: str,
     client_order_id: Optional[str],
     take_profit: Optional[float],
     stop_loss: Optional[float],
     stop_loss_limit: Optional[float],
 ) -> None:
-    """Place a MARKET buy order."""
+    """Place a MARKET buy order. Use QTY for shares or --notional for dollar value."""
+    # Validate that exactly one of qty or notional is provided
+    if qty is None and notional is None:
+        logger.error("Must specify either QTY or --notional")
+        return
+    if qty is not None and notional is not None:
+        logger.error("Cannot specify both QTY and --notional")
+        return
+
     bracket_params = build_bracket_params(take_profit, stop_loss, stop_loss_limit)
 
     req = MarketOrderRequest(
         symbol=symbol.upper(),
         qty=qty,
+        notional=notional,
         side=OrderSide.BUY,
         time_in_force=TimeInForce(tif.lower()),
         client_order_id=client_order_id,
@@ -293,7 +311,13 @@ def sell() -> None:
 
 @sell.command()
 @click.argument("symbol")
-@click.argument("qty", type=float)
+@click.argument("qty", type=float, required=False, default=None)
+@click.option(
+    "--notional",
+    type=float,
+    default=None,
+    help="Trade by dollar value instead of qty (for fractional shares)",
+)
 @click.option(
     "--tif",
     default="day",
@@ -310,19 +334,29 @@ def sell() -> None:
 @click.option("--stop-loss-limit", type=float, help="Stop Loss Limit Price (optional)")
 def market(
     symbol: str,
-    qty: float,
+    qty: Optional[float],
+    notional: Optional[float],
     tif: str,
     client_order_id: Optional[str],
     take_profit: Optional[float],
     stop_loss: Optional[float],
     stop_loss_limit: Optional[float],
 ) -> None:
-    """Place a MARKET sell order."""
+    """Place a MARKET sell order. Use QTY for shares or --notional for dollar value."""
+    # Validate that exactly one of qty or notional is provided
+    if qty is None and notional is None:
+        logger.error("Must specify either QTY or --notional")
+        return
+    if qty is not None and notional is not None:
+        logger.error("Cannot specify both QTY and --notional")
+        return
+
     bracket_params = build_bracket_params(take_profit, stop_loss, stop_loss_limit)
 
     req = MarketOrderRequest(
         symbol=symbol.upper(),
         qty=qty,
+        notional=notional,
         side=OrderSide.SELL,
         time_in_force=TimeInForce(tif.lower()),
         client_order_id=client_order_id,
@@ -502,9 +536,57 @@ def trailing(
 )
 @click.option("--limit", default=50, help="Max number of orders to list")
 @click.option("--days", default=0, help="Filter orders from the last N days")
-def orders(status: str, limit: int, days: int) -> None:
-    """List orders."""
-    logger.info(f"Fetching {status} orders (Limit: {limit})...")
+@click.option(
+    "--direction",
+    type=click.Choice(["asc", "desc"], case_sensitive=False),
+    default="desc",
+    help="Sort direction by submission time",
+)
+@click.option(
+    "--side",
+    type=click.Choice(["buy", "sell"], case_sensitive=False),
+    default=None,
+    help="Filter by order side",
+)
+@click.option(
+    "--symbols",
+    default=None,
+    help="Comma-separated list of symbols to filter",
+)
+@click.option(
+    "--nested/--no-nested",
+    default=True,
+    help="Roll up multi-leg orders under primary",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "json", "csv"], case_sensitive=False),
+    default="table",
+    help="Output format",
+)
+@click.option(
+    "--export",
+    type=click.Path(),
+    default=None,
+    help="Export to file path",
+)
+def orders(
+    status: str,
+    limit: int,
+    days: int,
+    direction: str,
+    side: Optional[str],
+    symbols: Optional[str],
+    nested: bool,
+    output_format: str,
+    export: Optional[str],
+) -> None:
+    """List orders with advanced filtering."""
+    from alpaca.common.enums import Sort
+    from alpaca_cli.cli.utils import output_data
+
+    logger.info(f"Fetching {status} orders (Limit: {limit}, Direction: {direction})...")
 
     from datetime import datetime, timedelta
 
@@ -513,14 +595,29 @@ def orders(status: str, limit: int, days: int) -> None:
         after = datetime.now() - timedelta(days=days)
         logger.info(f"Filtering orders after: {after.strftime('%Y-%m-%d')}")
 
+    # Parse symbols if provided
+    symbol_list = None
+    if symbols:
+        symbol_list = [s.strip().upper() for s in symbols.split(",")]
+        logger.info(f"Filtering by symbols: {symbol_list}")
+
+    # Parse side if provided
+    order_side = None
+    if side:
+        order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+        logger.info(f"Filtering by side: {order_side.name}")
+
     client = get_trading_client()
 
     try:
         req = GetOrdersRequest(
             status=getattr(QueryOrderStatus, status.upper()),
             limit=limit,
-            nested=True,  # Show nested orders if any (e.g. OCO legs)
+            nested=nested,
             after=after,
+            direction=Sort.ASC if direction.lower() == "asc" else Sort.DESC,
+            side=order_side,
+            symbols=symbol_list,
         )
         orders_list = client.get_orders(filter=req)
 
@@ -533,7 +630,7 @@ def orders(status: str, limit: int, days: int) -> None:
             rows.append(
                 [
                     str(o.created_at.strftime("%Y-%m-%d %H:%M:%S")),
-                    o.id,
+                    str(o.id),
                     o.symbol,
                     o.side.name,
                     o.type.name,
@@ -543,10 +640,22 @@ def orders(status: str, limit: int, days: int) -> None:
                 ]
             )
 
-        print_table(
+        columns = [
+            "Time",
+            "ID",
+            "Symbol",
+            "Side",
+            "Type",
+            "Qty",
+            "Fill Price",
+            "Status",
+        ]
+        output_data(
             f"{status} Orders",
-            ["Time", "ID", "Symbol", "Side", "Type", "Qty", "Fill Price", "Status"],
+            columns,
             rows,
+            output_format=output_format,
+            export_path=export,
         )
 
     except Exception as e:
@@ -605,7 +714,8 @@ def cancel(order_id: Optional[str], all: bool) -> None:
     help="Time in Force: day, gtc (good-til-cancelled), ioc, fok",
 )
 @click.option(
-    "--yes", "-y",
+    "--yes",
+    "-y",
     is_flag=True,
     help="Skip confirmation prompt (required for execution without prompts)",
 )
@@ -712,43 +822,16 @@ def rebalance(
                         invalid_symbols.append(f"{sym} (not tradable)")
                 except Exception:
                     invalid_symbols.append(f"{sym} (not found)")
-            
+
             if invalid_symbols:
                 logger.error(f"Invalid symbols detected: {invalid_symbols}. Aborting.")
                 return
-            logger.info(f"Validated {len(stock_symbols_to_validate)} symbol(s) as tradable")
+            logger.info(
+                f"Validated {len(stock_symbols_to_validate)} symbol(s) as tradable"
+            )
         except Exception as e:
             logger.error(f"Failed to validate symbols: {e}")
             return
-
-    # Fetch snapshots
-    # Snapshots might be crypto or stock. Need to determine.
-    # Alpaca TradingClient doesn't directly give snapshots easily mixed?
-    # Usually requires Data API.
-    # Wait, `get_trading_client` returns `TradingClient`. Structure implies `alpaca-py` SDK.
-    # `TradingClient` doesn't fetch market data directly usually?
-    # `alpaca-py` has `StockHistoricalDataClient` and `CryptoHistoricalDataClient`.
-    # I might need to import data client.
-    # Let's check `alpaca_cli.core.client` to see if there's a helper or if I instantiate it.
-
-    # Assuming I can't easily guess, I'll try to find where market data is used.
-    # `src/alpaca_cli/cli/groups/data.py` likely has it.
-    # I'll try to import `get_data_client` if it exists, roughly guessing. Or just `StockHistoricalDataClient`.
-    # But I need API keys. `get_trading_client` sets them up.
-    # Let's check `src/alpaca_cli/core/client.py`.
-
-    # For now, I'll optimistically fetch prices via `TradingClient` if possible?
-    # No, existing `positions()` uses `pos.current_price` which comes from `get_all_positions`.
-    # For assets I DON'T have, I need to fetch price.
-    # `get_all_positions` only gives price for what I HAVE.
-    # If I need to buy `NVDA` and I don't have it, I need its price.
-
-    # I need to use `StockHistoricalDataClient`.
-    # I'll add the import and instantiation logic inside the command to avoid circular deps if any.
-
-    # Helper to get data client - maybe replicate logic from core/client?
-    # I'll check core/client quickly in next step if this fails, but for now reasonable guess:
-    config.validate()
 
     # Separate crypto and stock symbols
     # Crypto symbols contain "/" (e.g., BTC/USD, ETH/USD)
@@ -757,10 +840,10 @@ def rebalance(
 
     current_prices = {}
 
-    # Fetch stock prices
+    # Fetch stock prices using singleton client
     if stock_symbols:
         try:
-            stock_client = StockHistoricalDataClient(config.API_KEY, config.API_SECRET)
+            stock_client = get_stock_data_client()
             req = StockLatestQuoteRequest(symbol_or_symbols=list(stock_symbols))
             quotes = stock_client.get_stock_latest_quote(req)
             for sym, quote in quotes.items():
@@ -770,10 +853,10 @@ def rebalance(
             logger.error(f"Failed to fetch stock prices: {e}")
             return
 
-    # Fetch crypto prices
+    # Fetch crypto prices using singleton client
     if crypto_symbols:
         try:
-            crypto_client = CryptoHistoricalDataClient(config.API_KEY, config.API_SECRET)
+            crypto_client = get_crypto_data_client()
             req = CryptoLatestQuoteRequest(symbol_or_symbols=list(crypto_symbols))
             quotes = crypto_client.get_crypto_latest_quote(req)
             for sym, quote in quotes.items():
@@ -840,7 +923,7 @@ def rebalance(
                 [o["symbol"], o["side"].upper(), f"{o['qty']:.4f}", order_type.upper()]
             )
         print_table("Orders to Execute", ["Symbol", "Side", "Qty", "Type"], rows)
-        
+
         confirm = click.confirm("Do you want to proceed with execution?", default=False)
         if not confirm:
             logger.info("Execution cancelled by user.")
@@ -848,7 +931,7 @@ def rebalance(
 
     # 8. Execute orders (sells first, then buys)
     tif_enum = TimeInForce(tif.lower())
-    
+
     for o in sorted_orders:
         try:
             if order_type.lower() == "market":

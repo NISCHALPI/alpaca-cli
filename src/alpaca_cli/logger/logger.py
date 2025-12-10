@@ -17,15 +17,24 @@ def configure_logging(level: str = "INFO") -> None:
     Args:
         level: The logging level to use (default: "INFO")
     """
+    from rich.console import Console
+
+    # Use a Console with forced width to prevent vertical output in narrow terminals
+    console = Console(width=120, force_terminal=True)
+
     logging.basicConfig(
         level=level,
         format="%(message)s",
         datefmt="[%Y-%m-%d %H:%M:%S]",
         handlers=[
             RichHandler(
+                console=console,
                 rich_tracebacks=True,
                 tracebacks_show_locals=True,
                 omit_repeated_times=False,
+                show_path=True,
+                markup=True,
+                log_time_format="[%Y-%m-%d %H:%M:%S]",
             )
         ],
     )

@@ -8,11 +8,10 @@ from rich.text import Text
 from rich.align import Align
 from rich import box
 
-from alpaca_cli.core.client import get_trading_client
+from alpaca_cli.core.client import get_trading_client, get_stock_data_client
 from alpaca_cli.core.config import config
 from alpaca_cli.logger.logger import get_logger
 from alpaca_cli.cli.utils import format_currency
-from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.historical.news import NewsClient
 from alpaca.data.requests import NewsRequest, StockSnapshotRequest
 
@@ -77,8 +76,7 @@ def get_market_status_panel():
 
 
 def get_indices_panel():
-    config.validate()
-    client = StockHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_stock_data_client()
 
     symbols = ["SPY", "QQQ", "DIA", "IWM"]
     req = StockSnapshotRequest(symbol_or_symbols=symbols)
@@ -238,15 +236,36 @@ def get_news_panel():
 
 
 @click.command()
-def dashboard() -> None:
+@click.option("--watch", "-w", is_flag=True, help="Auto-refresh dashboard")
+@click.option(
+    "--interval", "-i", default=5, help="Refresh interval in seconds (default: 5)"
+)
+def dashboard(watch: bool, interval: int) -> None:
     """Show the trading dashboard."""
-    layout = make_layout()
+    import time
+    from rich.live import Live
 
-    # We could do this concurrently but simplest approach first
-    layout["header"].update(get_market_status_panel())
-    layout["indices"].update(get_indices_panel())
-    layout["account"].update(get_account_panel())
-    layout["positions"].update(get_positions_panel())
-    layout["news"].update(get_news_panel())
+    def render_dashboard():
+        layout = make_layout()
+        layout["header"].update(get_market_status_panel())
+        layout["indices"].update(get_indices_panel())
+        layout["account"].update(get_account_panel())
+        layout["positions"].update(get_positions_panel())
+        layout["news"].update(get_news_panel())
+        return layout
 
-    console.print(layout)
+    if watch:
+        logger.info(
+            f"Starting dashboard with {interval}s refresh. Press Ctrl+C to exit."
+        )
+        try:
+            with Live(
+                render_dashboard(), console=console, refresh_per_second=1
+            ) as live:
+                while True:
+                    time.sleep(interval)
+                    live.update(render_dashboard())
+        except KeyboardInterrupt:
+            logger.info("Dashboard stopped.")
+    else:
+        console.print(render_dashboard())

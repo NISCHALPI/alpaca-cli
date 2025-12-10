@@ -1,5 +1,5 @@
 import rich_click as click
-from typing import List, Any
+from typing import List, Any, Optional
 from datetime import datetime
 from alpaca_cli.core.client import get_trading_client
 from alpaca_cli.cli.utils import print_table, format_currency
@@ -94,8 +94,35 @@ def positions() -> None:
 )
 @click.option("--date_end", help="End date (YYYY-MM-DD) [UTC]")
 @click.option("--extended", is_flag=True, help="Include extended hours")
-def history(period: str, timeframe: str, date_end: str, extended: bool) -> None:
-    """Show portfolio history."""
+@click.option(
+    "--start",
+    default=None,
+    help="Start datetime (RFC3339 format, e.g. 2024-01-01T09:00:00-05:00)",
+)
+@click.option(
+    "--intraday-reporting",
+    type=click.Choice(
+        ["market_hours", "extended_hours", "continuous"], case_sensitive=False
+    ),
+    default=None,
+    help="Timestamps to return for intraday data",
+)
+@click.option(
+    "--pnl-reset",
+    type=click.Choice(["per_day", "no_reset"], case_sensitive=False),
+    default=None,
+    help="Baseline for P/L calculation in intraday queries",
+)
+def history(
+    period: str,
+    timeframe: str,
+    date_end: str,
+    extended: bool,
+    start: Optional[str],
+    intraday_reporting: Optional[str],
+    pnl_reset: Optional[str],
+) -> None:
+    """Show portfolio history with advanced options."""
     logger.info(f"Fetching portfolio history ({period}, {timeframe})...")
     client = get_trading_client()
 
@@ -107,11 +134,25 @@ def history(period: str, timeframe: str, date_end: str, extended: bool) -> None:
             logger.error("Invalid date format. Use YYYY-MM-DD.")
             return
 
+    # Parse start datetime if provided
+    start_dt = None
+    if start:
+        try:
+            start_dt = datetime.fromisoformat(start)
+        except ValueError:
+            logger.error(
+                "Invalid start datetime format. Use RFC3339 (e.g. 2024-01-01T09:00:00-05:00)"
+            )
+            return
+
     req = GetPortfolioHistoryRequest(
         period=period,
         timeframe=timeframe,
         date_end=date_end_dt,
         extended_hours=extended,
+        start=start_dt,
+        intraday_reporting=intraday_reporting,
+        pnl_reset=pnl_reset,
     )
 
     try:
