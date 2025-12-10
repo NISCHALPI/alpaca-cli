@@ -112,3 +112,39 @@ def test_options_chain(runner):
         assert "Option Chain: AAPL" in result.output
         assert "AAPL230616C00150000" in result.output
         assert "0.500" in result.output  # Delta
+
+
+def test_news_command(runner):
+    """Test 'data news' command."""
+    from alpaca.data.models.news import NewsSet
+
+    with patch("alpaca.data.historical.news.NewsClient") as MockClient:
+        mock_instance = MockClient.return_value
+        
+        # Mock result
+        mock_result = MagicMock(spec=NewsSet)
+        
+        # Mock article
+        mock_article = MagicMock()
+        mock_article.headline = "Test Headline"
+        mock_article.symbols = ["AAPL"]
+        mock_article.created_at = datetime(2023, 1, 1, 12, 0)
+        mock_article.source = "Benzinga"
+        # Mock content if needed
+        mock_article.content = "Content"
+        mock_article.url = "http://example.com"
+        
+        # Setup .data dictionary
+        mock_result.data = {"news": [mock_article]}
+        
+        mock_instance.get_news.return_value = mock_result
+        
+        result = runner.invoke(cli, ["data", "news", "--symbols", "AAPL"])
+        
+        if result.exit_code != 0:
+            print(result.output)
+
+        assert result.exit_code == 0
+        assert "Test Headline" in result.output
+        assert "Benzinga" in result.output
+

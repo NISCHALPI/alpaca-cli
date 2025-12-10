@@ -42,14 +42,16 @@ def news(
     try:
         client = NewsClient(config.API_KEY, config.API_SECRET)
 
-        symbol_list = (
-            [s.strip().upper() for s in symbols.split(",")] if symbols else None
+        symbol_str = (
+            ",".join([s.strip().upper() for s in symbols.split(",")])
+            if symbols
+            else None
         )
         start_dt = datetime.strptime(start, "%Y-%m-%d") if start else None
         end_dt = datetime.strptime(end, "%Y-%m-%d") if end else None
 
         req = NewsRequest(
-            symbols=symbol_list,
+            symbols=symbol_str,
             start=start_dt,
             end=end_dt,
             limit=limit,
@@ -60,12 +62,12 @@ def news(
 
         result = client.get_news(req)
 
-        if not result or not result.news:
+        if not result or not result.data.get("news"):
             logger.info("No news found.")
             return
 
         rows = []
-        for article in result.news:
+        for article in result.data.get("news", []):
             symbols_str = (
                 ", ".join(article.symbols[:3])
                 + ("..." if len(article.symbols) > 3 else "")
@@ -95,7 +97,7 @@ def news(
 
         if include_content:
             logger.info("\n--- Full Articles ---")
-            for article in result.news:
+            for article in result.data.get("news", []):
                 logger.info(f"\n[bold]{article.headline}[/bold]")
                 logger.info(f"Source: {article.source} | {article.created_at}")
                 if article.content:
