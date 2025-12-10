@@ -18,16 +18,40 @@ def corporate_actions() -> None:
 
 @corporate_actions.command("list")
 @click.option(
-    "--ca-types", help="Comma-separated types (dividend, merger, spinoff, split)"
+    "--ca-types",
+    type=str,
+    default=None,
+    help="[Optional] Comma-separated action types. Choices: dividend, merger, spinoff, split",
 )
-@click.option("--since", help="Since date (YYYY-MM-DD)")
-@click.option("--until", help="Until date (YYYY-MM-DD)")
-@click.option("--symbol", help="Filter by symbol")
-@click.option("--cusip", help="Filter by CUSIP")
+@click.option(
+    "--since",
+    type=str,
+    default=None,
+    help="[Optional] Since date in YYYY-MM-DD format",
+)
+@click.option(
+    "--until",
+    type=str,
+    default=None,
+    help="[Optional] Until date in YYYY-MM-DD format",
+)
+@click.option(
+    "--symbol",
+    type=str,
+    default=None,
+    help="[Optional] Filter by ticker symbol",
+)
+@click.option(
+    "--cusip",
+    type=str,
+    default=None,
+    help="[Optional] Filter by CUSIP identifier",
+)
 @click.option(
     "--date-type",
     type=click.Choice(["declaration", "ex", "record", "payable"]),
-    help="Date type for filtering",
+    default=None,
+    help="[Optional] Date type for filtering. Choices: declaration, ex, record, payable",
 )
 def list_corporate_actions(
     ca_types: Optional[str],

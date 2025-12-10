@@ -120,10 +120,10 @@ def test_news_command(runner):
 
     with patch("alpaca.data.historical.news.NewsClient") as MockClient:
         mock_instance = MockClient.return_value
-        
+
         # Mock result
         mock_result = MagicMock(spec=NewsSet)
-        
+
         # Mock article
         mock_article = MagicMock()
         mock_article.headline = "Test Headline"
@@ -133,14 +133,14 @@ def test_news_command(runner):
         # Mock content if needed
         mock_article.content = "Content"
         mock_article.url = "http://example.com"
-        
+
         # Setup .data dictionary
         mock_result.data = {"news": [mock_article]}
-        
+
         mock_instance.get_news.return_value = mock_result
-        
+
         result = runner.invoke(cli, ["data", "news", "--symbols", "AAPL"])
-        
+
         if result.exit_code != 0:
             print(result.output)
 
@@ -148,3 +148,20 @@ def test_news_command(runner):
         assert "Test Headline" in result.output
         assert "Benzinga" in result.output
 
+
+def test_option_bars_validation(runner):
+    """Test validation in 'data options bars' triggers for underlying symbols."""
+    # Invoking with 'NVDA' which is underlying, not option
+    with patch("alpaca_cli.cli.groups.data.options.logger") as mock_logger:
+        result = runner.invoke(cli, ["data", "options", "bars", "NVDA"])
+
+        assert result.exit_code == 0
+
+        # Check that error was logged
+        mock_logger.error.assert_called_once()
+        args, _ = mock_logger.error.call_args
+        error_msg = args[0]
+
+        assert "Invalid option symbol 'NVDA'" in error_msg
+        assert "alpaca-cli data stock bars NVDA" in error_msg
+        assert "alpaca-cli data options chain NVDA" in error_msg

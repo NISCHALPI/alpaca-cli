@@ -39,15 +39,59 @@ def options() -> None:
 
 @options.command("bars")
 @click.argument("symbols")
-@click.option("--timeframe", "-t", default="1Day", help="Timeframe (1Min, 1Hour, 1Day)")
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=100, help="Number of bars")
-@click.option("--sort", type=click.Choice(["asc", "desc"]))
-def option_bars(symbols, timeframe, start, end, limit, sort):
+@click.option(
+    "--timeframe",
+    "-t",
+    type=str,
+    default="1Day",
+    help="[Optional] Timeframe for bars. Choices: 1Min, 1Hour, 1Day. Default: 1Day",
+)
+@click.option(
+    "--start",
+    type=str,
+    default=None,
+    help="[Optional] Start date in YYYY-MM-DD format. Default: 30 days before end date",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format. Default: current date",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=100,
+    help="[Optional] Maximum number of bars to return. Default: 100",
+)
+@click.option(
+    "--sort",
+    type=click.Choice(["asc", "desc"]),
+    default=None,
+    help="[Optional] Sort order for results. Choices: asc, desc",
+)
+def option_bars(
+    symbols: str,
+    timeframe: str,
+    start: Optional[str],
+    end: Optional[str],
+    limit: int,
+    sort: Optional[str],
+) -> None:
     """Get historical option bars (OHLCV)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
+
+    # Validation: reject underlying symbols
+    for s in symbol_list:
+        if s.isalpha():
+            logger.error(
+                f"Invalid option symbol '{s}'. This command expects option contract symbols (e.g., 'AAPL230616C00150000').\n"
+                f"  - To get underlying stock data, use: alpaca-cli data stock bars {s}\n"
+                f"  - To find option symbols, use: alpaca-cli data options chain {s}"
+            )
+            return
+
     logger.info(f"Fetching option bars for {symbol_list}...")
 
     client = OptionHistoricalDataClient(config.API_KEY, config.API_SECRET)
@@ -74,12 +118,12 @@ def option_bars(symbols, timeframe, start, end, limit, sort):
         )
         bars = client.get_option_bars(req)
 
-        if not bars.data:
+        if not bars.data:  # type: ignore
             logger.info("No data found.")
             return
 
         for sym in symbol_list:
-            if sym not in bars.data:
+            if sym not in bars.data:  # type: ignore
                 continue
             rows = [
                 [
@@ -101,14 +145,50 @@ def option_bars(symbols, timeframe, start, end, limit, sort):
 
 @options.command("trades")
 @click.argument("symbols")
-@click.option("--start", required=True, help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=100, help="Number of trades")
-@click.option("--sort", type=click.Choice(["asc", "desc"]))
-def option_trades(symbols, start, end, limit, sort):
+@click.option(
+    "--start",
+    type=str,
+    required=True,
+    help="[Required] Start date in YYYY-MM-DD format",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format. Default: current date",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=100,
+    help="[Optional] Maximum number of trades to return. Default: 100",
+)
+@click.option(
+    "--sort",
+    type=click.Choice(["asc", "desc"]),
+    default=None,
+    help="[Optional] Sort order for results. Choices: asc, desc",
+)
+def option_trades(
+    symbols: str,
+    start: str,
+    end: Optional[str],
+    limit: int,
+    sort: Optional[str],
+) -> None:
     """Get historical option trades."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    # Validation: reject underlying symbols
+    for s in symbol_list:
+        if s.isalpha():
+            logger.error(
+                f"Invalid option symbol '{s}'. This command expects option contract symbols (e.g., 'AAPL230616C00150000').\n"
+                f"  - To get underlying stock trades, use: alpaca-cli data stock trades {s}\n"
+                f"  - To find option symbols, use: alpaca-cli data options chain {s}"
+            )
+            return
+
     logger.info(f"Fetching option trades for {symbol_list}...")
 
     client = OptionHistoricalDataClient(config.API_KEY, config.API_SECRET)
@@ -152,12 +232,25 @@ def option_trades(symbols, start, end, limit, sort):
 @options.command("latest")
 @click.argument("symbols")
 @click.option(
-    "--type", "data_type", type=click.Choice(["quote", "trade", "both"]), default="both"
+    "--type",
+    "data_type",
+    type=click.Choice(["quote", "trade", "both"]),
+    default="both",
+    help="[Optional] Type of data to fetch. Choices: quote, trade, both. Default: both",
 )
-def option_latest(symbols, data_type):
+def option_latest(symbols: str, data_type: str) -> None:
     """Get latest option quote and/or trade."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    # Validation
+    for s in symbol_list:
+        if s.isalpha():
+            logger.error(
+                f"Invalid option symbol '{s}'. This command expects option contract symbols.\n"
+                f"  - To get underlying stock quotes, use: alpaca-cli data stock latest {s}"
+            )
+            return
+
     logger.info(f"Fetching latest option data for {symbol_list}...")
 
     client = OptionHistoricalDataClient(config.API_KEY, config.API_SECRET)
@@ -203,10 +296,19 @@ def option_latest(symbols, data_type):
 
 @options.command("snapshot")
 @click.argument("symbols")
-def option_snapshot(symbols):
+def option_snapshot(symbols: str) -> None:
     """Get option snapshot with Greeks and implied volatility."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    # Validation
+    for s in symbol_list:
+        if s.isalpha():
+            logger.error(
+                f"Invalid option symbol '{s}'. This command expects option contract symbols (e.g., 'AAPL230616C00150000').\n"
+                f"  - To get underlying stock snapshots, use: alpaca-cli data stock snapshot {s}"
+            )
+            return
+
     logger.info(f"Fetching option snapshots for {symbol_list}...")
 
     client = OptionHistoricalDataClient(config.API_KEY, config.API_SECRET)
@@ -273,13 +375,38 @@ def option_snapshot(symbols):
 
 @options.command("chain")
 @click.argument("underlying_symbol")
-@click.option("--expiry", help="Expiration date filter (YYYY-MM-DD)")
 @click.option(
-    "--type", "option_type", type=click.Choice(["call", "put"]), help="Option type"
+    "--expiry",
+    type=str,
+    default=None,
+    help="[Optional] Filter by expiration date in YYYY-MM-DD format",
 )
-@click.option("--strike-from", type=float, help="Strike price range start")
-@click.option("--strike-to", type=float, help="Strike price range end")
-def option_chain(underlying_symbol, expiry, option_type, strike_from, strike_to):
+@click.option(
+    "--type",
+    "option_type",
+    type=click.Choice(["call", "put"]),
+    default=None,
+    help="[Optional] Filter by option type. Choices: call, put",
+)
+@click.option(
+    "--strike-from",
+    type=float,
+    default=None,
+    help="[Optional] Minimum strike price filter",
+)
+@click.option(
+    "--strike-to",
+    type=float,
+    default=None,
+    help="[Optional] Maximum strike price filter",
+)
+def option_chain(
+    underlying_symbol: str,
+    expiry: Optional[str],
+    option_type: Optional[str],
+    strike_from: Optional[float],
+    strike_to: Optional[float],
+) -> None:
     """Get full option chain for an underlying symbol."""
     config.validate()
     logger.info(f"Fetching option chain for {underlying_symbol.upper()}...")
@@ -347,7 +474,7 @@ def option_chain(underlying_symbol, expiry, option_type, strike_from, strike_to)
 
 
 @options.command("exchanges")
-def option_exchanges():
+def option_exchanges() -> None:
     """Get option exchange code mappings."""
     config.validate()
     logger.info("Fetching option exchange codes...")

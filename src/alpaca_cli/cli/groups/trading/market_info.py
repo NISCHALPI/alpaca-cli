@@ -33,9 +33,24 @@ def clock() -> None:
 
 
 @click.command()
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=30, help="Number of days to show")
+@click.option(
+    "--start",
+    type=str,
+    default=None,
+    help="[Optional] Start date in YYYY-MM-DD format",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=30,
+    help="[Optional] Maximum number of calendar days to show. Default: 30",
+)
 def calendar(start: Optional[str], end: Optional[str], limit: int) -> None:
     """Get market calendar (trading days and hours)."""
     logger.info("Fetching market calendar...")

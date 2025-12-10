@@ -3,7 +3,11 @@
 import rich_click as click
 from typing import List, Any, Optional
 from alpaca_cli.core.client import get_trading_client
-from alpaca_cli.cli.utils import print_table, format_currency
+from alpaca_cli.cli.utils import (
+    print_table,
+    format_currency,
+    calculate_position_weights,
+)
 from alpaca_cli.logger.logger import get_logger
 
 logger = get_logger("trading.positions")
@@ -26,8 +30,12 @@ def list_positions() -> None:
         logger.info("No open positions.")
         return
 
+    # Calculate weight percentages using utility function
+    market_values = [float(pos.market_value) for pos in pos_list]
+    weights = calculate_position_weights(market_values)
+
     rows: List[List[Any]] = []
-    for pos in pos_list:
+    for pos, weight_pct in zip(pos_list, weights):
         pl_percent = float(pos.unrealized_plpc) * 100
         pl_color = "green" if pl_percent >= 0 else "red"
         pl_str = f"[{pl_color}]{format_currency(pos.unrealized_pl)} ({pl_percent:.2f}%)[/{pl_color}]"
@@ -40,13 +48,23 @@ def list_positions() -> None:
                 format_currency(pos.avg_entry_price),
                 format_currency(pos.current_price),
                 format_currency(pos.market_value),
+                f"{weight_pct:.2f}%",
                 pl_str,
             ]
         )
 
     print_table(
         "Open Positions",
-        ["Symbol", "Side", "Qty", "Avg Entry", "Current", "Market Value", "P/L"],
+        [
+            "Symbol",
+            "Side",
+            "Qty",
+            "Avg Entry",
+            "Current",
+            "Market Value",
+            "Weight %",
+            "P/L",
+        ],
         rows,
     )
 
@@ -86,10 +104,29 @@ def get_position(symbol_or_asset_id: str) -> None:
 
 @positions.command("close")
 @click.argument("symbol_or_asset_id", required=False)
-@click.option("--all", "close_all", is_flag=True, help="Close ALL open positions")
-@click.option("--qty", type=float, help="Partial close: number of shares/contracts")
-@click.option("--percentage", type=float, help="Partial close: percentage (0-100)")
-@click.option("--cancel-orders", is_flag=True, help="Cancel open orders before closing")
+@click.option(
+    "--all",
+    "close_all",
+    is_flag=True,
+    help="[Optional] Close ALL open positions",
+)
+@click.option(
+    "--qty",
+    type=float,
+    default=None,
+    help="[Optional] Partial close: number of shares/contracts to close",
+)
+@click.option(
+    "--percentage",
+    type=float,
+    default=None,
+    help="[Optional] Partial close: percentage of position to close (0-100)",
+)
+@click.option(
+    "--cancel-orders",
+    is_flag=True,
+    help="[Optional] Cancel open orders for the position before closing",
+)
 def close_position(
     symbol_or_asset_id: Optional[str],
     close_all: bool,
@@ -149,7 +186,7 @@ def exercise_option(symbol_or_contract_id: str) -> None:
 
     try:
         result = client.exercise_options_position(symbol_or_contract_id.upper())
-        logger.info(f"Option exercise submitted successfully.")
+        logger.info("Option exercise submitted successfully.")
         if result:
             logger.info(f"Result: {result}")
     except Exception as e:

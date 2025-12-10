@@ -5,10 +5,8 @@ from alpaca_cli.cli.main import cli
 from alpaca.trading.models import TradeAccount, Position, Order
 from alpaca.trading.enums import (
     AccountStatus,
-    OrderSide,
     OrderType,
     OrderStatus,
-    TimeInForce,
 )
 
 

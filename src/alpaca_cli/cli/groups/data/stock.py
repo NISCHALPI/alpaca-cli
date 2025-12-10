@@ -2,7 +2,7 @@
 
 import rich_click as click
 import asyncio
-from typing import Optional, List, Any
+from typing import Optional
 from datetime import datetime, timedelta, timezone
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.live import StockDataStream
@@ -64,17 +64,63 @@ def stock() -> None:
 @click.option(
     "--timeframe",
     "-t",
+    type=str,
     default="1Day",
-    help="Timeframe (1Min, 1Hour, 1Day, 1Week, 1Month)",
+    help="[Optional] Timeframe for bars. Choices: 1Min, 1Hour, 1Day, 1Week, 1Month. Default: 1Day",
 )
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=100, help="Number of bars")
-@click.option("--adjustment", type=click.Choice(["raw", "split", "dividend", "all"]))
-@click.option("--feed", type=click.Choice(["iex", "sip"]), default="iex")
-@click.option("--sort", type=click.Choice(["asc", "desc"]))
-@click.option("--currency", help="Currency for results")
-def stock_bars(symbols, timeframe, start, end, limit, adjustment, feed, sort, currency):
+@click.option(
+    "--start",
+    type=str,
+    default=None,
+    help="[Optional] Start date in YYYY-MM-DD format. Default: end date minus limit days",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format. Default: current date",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=100,
+    help="[Optional] Maximum number of bars to return. Default: 100",
+)
+@click.option(
+    "--adjustment",
+    type=click.Choice(["raw", "split", "dividend", "all"]),
+    default=None,
+    help="[Optional] Price adjustment type. Choices: raw, split, dividend, all",
+)
+@click.option(
+    "--feed",
+    type=click.Choice(["iex", "sip"]),
+    default="iex",
+    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
+)
+@click.option(
+    "--sort",
+    type=click.Choice(["asc", "desc"]),
+    default=None,
+    help="[Optional] Sort order for results. Choices: asc, desc",
+)
+@click.option(
+    "--currency",
+    type=str,
+    default=None,
+    help="[Optional] Currency for price results (e.g., USD, EUR)",
+)
+def stock_bars(
+    symbols: str,
+    timeframe: str,
+    start: Optional[str],
+    end: Optional[str],
+    limit: int,
+    adjustment: Optional[str],
+    feed: str,
+    sort: Optional[str],
+    currency: Optional[str],
+) -> None:
     """Get historical stock bars (OHLCV)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -137,12 +183,44 @@ def stock_bars(symbols, timeframe, start, end, limit, adjustment, feed, sort, cu
 
 @stock.command("quotes")
 @click.argument("symbols")
-@click.option("--start", required=True, help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=100, help="Number of quotes")
-@click.option("--feed", type=click.Choice(["iex", "sip"]), default="iex")
-@click.option("--sort", type=click.Choice(["asc", "desc"]))
-def stock_quotes(symbols, start, end, limit, feed, sort):
+@click.option(
+    "--start",
+    type=str,
+    required=True,
+    help="[Required] Start date in YYYY-MM-DD format",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format. Default: current date",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=100,
+    help="[Optional] Maximum number of quotes to return. Default: 100",
+)
+@click.option(
+    "--feed",
+    type=click.Choice(["iex", "sip"]),
+    default="iex",
+    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
+)
+@click.option(
+    "--sort",
+    type=click.Choice(["asc", "desc"]),
+    default=None,
+    help="[Optional] Sort order for results. Choices: asc, desc",
+)
+def stock_quotes(
+    symbols: str,
+    start: str,
+    end: Optional[str],
+    limit: int,
+    feed: str,
+    sort: Optional[str],
+) -> None:
     """Get historical stock quotes (NBBO)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -196,12 +274,44 @@ def stock_quotes(symbols, start, end, limit, feed, sort):
 
 @stock.command("trades")
 @click.argument("symbols")
-@click.option("--start", required=True, help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=100, help="Number of trades")
-@click.option("--feed", type=click.Choice(["iex", "sip"]), default="iex")
-@click.option("--sort", type=click.Choice(["asc", "desc"]))
-def stock_trades(symbols, start, end, limit, feed, sort):
+@click.option(
+    "--start",
+    type=str,
+    required=True,
+    help="[Required] Start date in YYYY-MM-DD format",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format. Default: current date",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=100,
+    help="[Optional] Maximum number of trades to return. Default: 100",
+)
+@click.option(
+    "--feed",
+    type=click.Choice(["iex", "sip"]),
+    default="iex",
+    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
+)
+@click.option(
+    "--sort",
+    type=click.Choice(["asc", "desc"]),
+    default=None,
+    help="[Optional] Sort order for results. Choices: asc, desc",
+)
+def stock_trades(
+    symbols: str,
+    start: str,
+    end: Optional[str],
+    limit: int,
+    feed: str,
+    sort: Optional[str],
+) -> None:
     """Get historical stock trades (time & sales)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -251,9 +361,19 @@ def stock_trades(symbols, start, end, limit, feed, sort):
 
 @stock.command("latest")
 @click.argument("symbols")
-@click.option("--feed", type=click.Choice(["iex", "sip"]), default="iex")
-@click.option("--currency", help="Currency for results")
-def stock_latest(symbols, feed, currency):
+@click.option(
+    "--feed",
+    type=click.Choice(["iex", "sip"]),
+    default="iex",
+    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
+)
+@click.option(
+    "--currency",
+    type=str,
+    default=None,
+    help="[Optional] Currency for price results (e.g., USD, EUR)",
+)
+def stock_latest(symbols: str, feed: str, currency: Optional[str]) -> None:
     """Get latest stock quote, trade, and bar."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -303,9 +423,19 @@ def stock_latest(symbols, feed, currency):
 
 @stock.command("snapshot")
 @click.argument("symbols")
-@click.option("--feed", type=click.Choice(["iex", "sip"]), default="iex")
-@click.option("--currency", help="Currency for results")
-def stock_snapshot(symbols, feed, currency):
+@click.option(
+    "--feed",
+    type=click.Choice(["iex", "sip"]),
+    default="iex",
+    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
+)
+@click.option(
+    "--currency",
+    type=str,
+    default=None,
+    help="[Optional] Currency for price results (e.g., USD, EUR)",
+)
+def stock_snapshot(symbols: str, feed: str, currency: Optional[str]) -> None:
     """Get stock snapshot (quote, trade, bar, prev close)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -365,9 +495,16 @@ def stock_snapshot(symbols, feed, currency):
 
 @stock.command("stream")
 @click.argument("symbols")
-@click.option("--feed", type=click.Choice(["iex", "sip"]), default="iex")
-def stock_stream(symbols, feed):
+@click.option(
+    "--feed",
+    type=click.Choice(["iex", "sip"]),
+    default="iex",
+    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
+)
+def stock_stream(symbols: str, feed: str) -> None:
     """Stream live stock quotes and trades."""
+    import logging as stdlib_logging
+
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Starting stock stream for {symbol_list}...")
@@ -404,12 +541,17 @@ def stock_stream(symbols, feed):
         stream_client.subscribe_quotes(quote_handler, *symbol_list)
         stream_client.subscribe_trades(trade_handler, *symbol_list)
 
-        with Live(get_table(), refresh_per_second=4) as live:
+        # Suppress websocket logging during Live display to prevent interference
+        ws_logger = stdlib_logging.getLogger("alpaca.data.live.websocket")
+        ws_logger.setLevel(stdlib_logging.WARNING)
+
+        # Disable auto_refresh and use only manual update() calls to avoid double rendering
+        with Live(get_table(), auto_refresh=False) as live:
 
             async def update():
                 while True:
-                    live.update(get_table())
                     await asyncio.sleep(0.25)
+                    live.update(get_table(), refresh=True)
 
             task = asyncio.create_task(update())
             try:

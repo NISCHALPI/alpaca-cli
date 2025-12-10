@@ -1,6 +1,4 @@
-import os
 import rich_click as click
-from typing import Optional
 from alpaca_cli.core.config import config
 from alpaca_cli.core.client import get_trading_client
 from alpaca_cli.logger.logger import get_logger

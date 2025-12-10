@@ -82,12 +82,19 @@ def stream() -> None:
     async def run_stream():
         trading_stream.subscribe_trade_updates(trade_update_handler)
 
-        with Live(create_table(), refresh_per_second=2) as live:
+        # Suppress trading stream logging during Live display to prevent interference
+        import logging as stdlib_logging
+
+        trading_ws_logger = stdlib_logging.getLogger("alpaca.trading.stream")
+        trading_ws_logger.setLevel(stdlib_logging.WARNING)
+
+        # Disable auto_refresh and use only manual update() calls to avoid double rendering
+        with Live(create_table(), auto_refresh=False) as live:
 
             async def update_view():
                 while True:
-                    live.update(create_table())
                     await asyncio.sleep(0.5)
+                    live.update(create_table(), refresh=True)
 
             view_task = asyncio.create_task(update_view())
 

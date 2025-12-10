@@ -2,8 +2,7 @@
 
 import logging
 import time
-from functools import wraps
-from typing import Callable, Any, Generator
+from typing import Generator
 from contextlib import contextmanager
 from rich.logging import RichHandler
 

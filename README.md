@@ -1,6 +1,6 @@
 # Alpaca CLI
 
-A modern, feature-rich Command Line Interface for the Alpaca API, mirroring the structure of the Alpaca Python SDK.
+A modern, feature-rich Command Line Interface for the Alpaca API, designed to mirror the structure of the Alpaca Python SDK.
 
 ## Features
 
@@ -12,29 +12,58 @@ A modern, feature-rich Command Line Interface for the Alpaca API, mirroring the 
 
 ## Installation
 
+### Using `uv` (Recommended)
+
+This project uses `uv` for dependency management.
+
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/alpaca-cli.git
+git clone https://github.com/nischalpi/alpaca-cli.git
 cd alpaca-cli
 
-# Install with dependencies
-pip install -e .
+# Install dependencies and the tool
+uv sync
+```
+
+### Using `pip`
+
+```bash
+pip install .
 ```
 
 ## Configuration
 
-Set your Alpaca API credentials using environment variables:
+The CLI needs your Alpaca API credentials to function. You can provide these via environment variables or a configuration file.
+
+### Environment Variables
 
 ```bash
-export APCA_API_KEY_ID="your_api_key"
-export APCA_API_SECRET_KEY="your_api_secret"
-export APCA_API_BASE_URL="https://paper-api.alpaca.markets" # or https://api.alpaca.markets
+export APCA_API_KEY_ID="your_api_key_here"
+export APCA_API_SECRET_KEY="your_api_secret_here"
+
+# Optional: Default is Paper API
+export APCA_API_BASE_URL="https://paper-api.alpaca.markets" 
+# For Live trading:
+# export APCA_API_BASE_URL="https://api.alpaca.markets"
 ```
 
-Or verify your configuration with:
+### Configuration File
+
+Run the config wizard to set up your credentials interactively:
 
 ```bash
 alpaca-cli config
+```
+
+Or manually create `~/.alpaca.json`:
+
+```json
+{
+    "key": "your_api_key",
+    "secret": "your_api_secret",
+    "paper_endpoint": "https://paper-api.alpaca.markets",
+    "live_endpoint": "https://api.alpaca.markets"
+}
 ```
 
 ## Usage
@@ -43,46 +72,99 @@ The CLI is organized into two main groups: `trading` and `data`.
 
 ### Trading Commands
 
-Interact with your account and place orders.
+Interact with your account, manage positions, and handle orders.
+
+#### Account & Positions
 
 ```bash
-# Check account status
+# Check account status (Equity, Buying Power, P/L)
 alpaca-cli trading account status
 
-# List open positions
+# List all open positions
 alpaca-cli trading positions list
 
-# Place a market buy order
+# Close all positions (Liquidate)
+alpaca-cli trading positions close-all --cancel-orders
+```
+
+#### Orders
+
+```bash
+# Place a Market Buy Order (Day)
 alpaca-cli trading orders buy market AAPL 10
 
-# Place a limit sell order
-alpaca-cli trading orders sell limit BTC/USD 0.5 --limit-price 30500
+# Place a Limit Sell Order
+alpaca-cli trading orders sell limit BTC/USD 0.5 --limit-price 65000
 
-# Rebalance portfolio (from a weights file)
-alpaca-cli trading orders rebalance targets.json
+# Place a Stop Loss Order
+alpaca-cli trading orders buy stop TSLA 5 200
+
+# List Open Orders
+alpaca-cli trading orders list --status OPEN
+
+# Cancel a specific order
+alpaca-cli trading orders cancel <order_id> 
+
+# Cancel ALL open orders
+alpaca-cli trading orders cancel --all
+```
+
+#### Rebalancing
+
+Rebalance your portfolio based on a target weights file.
+
+```bash
+# rebalance.json example: {"AAPL": 0.5, "MSFT": 0.3, "CASH": 0.2}
+alpaca-cli trading orders rebalance rebalance.json
 ```
 
 ### Market Data Commands
 
 Fetch historical and real-time market data.
 
+#### Stocks
+
 ```bash
-# Get latest stock data
+# Get latest quote and bar for a stock
 alpaca-cli data stock latest AAPL
 
-# Get historical crypto bars
-alpaca-cli data crypto bars BTC/USD --timeframe 1H --limit 10   
+# Get historical bars (Hourly)
+alpaca-cli data stock bars SPY --timeframe 1H --limit 20
+```
 
-# Get options chain
-alpaca-cli data options chain SPY
+#### Crypto
 
-# Screen for market movers
-alpaca-cli data screeners movers --top 10
+```bash
+# Get latest crypto pricing
+alpaca-cli data crypto latest BTC/USD ETH/USD
+
+# Get historical bars
+alpaca-cli data crypto bars ETH/USD --timeframe 15Min --start 2024-01-01
+```
+
+#### Options
+
+```bash
+# Get Option Chain for a symbol
+alpaca-cli data options chain AMD
+
+# Get latest option quotes
+alpaca-cli data options quotes "AMD241220C00150000"
+```
+
+#### News & Screeners
+
+```bash
+# Get latest market news
+alpaca-cli data news --limit 5
+
+# Screen for top market movers (gainers/losers)
+alpaca-cli data screeners movers
 ```
 
 ### Quick Aliases
 
-For common tasks, use top-level aliases:
+For common tasks, use these top-level shortcuts:
 
 - `alpaca-cli buy ...`  -> `trading orders buy market ...`
 - `alpaca-cli sell ...` -> `trading orders sell market ...`
@@ -90,31 +172,26 @@ For common tasks, use top-level aliases:
 - `alpaca-cli status`   -> `trading account status`
 - `alpaca-cli quote ...`-> `data stock latest ...`
 - `alpaca-cli clock`    -> `trading clock`
-
-## Structure
-
-The CLI structure mirrors the SDK:
-
-- **`trading`**
-    - `account`
-    - `orders`
-    - `positions`
-    - `assets`
-    - `watchlists`
-    - `corporate-actions`
-    - `contracts` (Options)
-- **`data`**
-    - `stock`
-    - `crypto`
-    - `options`
-    - `news`
-    - `corporate-actions`
-    - `screeners`
+- `alpaca-cli dashboard`-> Launch interactive dashboard
 
 ## Development
 
-Run tests:
+### Running Tests
+
+We use `pytest` for unit and integration testing.
 
 ```bash
-pytest tests/unit
+uv run pytest
 ```
+
+### Code Formatting
+
+This project uses standard Python formatting tools.
+
+```bash
+uv run ruff check .
+```
+
+## License
+
+MIT

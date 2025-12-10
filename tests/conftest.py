@@ -2,7 +2,6 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from decimal import Decimal
 
 
 @pytest.fixture

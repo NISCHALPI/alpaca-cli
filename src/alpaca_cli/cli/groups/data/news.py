@@ -11,17 +11,39 @@ logger = get_logger("data.news")
 
 
 @click.command()
-@click.option("--symbols", help="Comma-separated list of symbols to filter by")
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=10, help="Number of news items")
 @click.option(
-    "--include-content/--no-content", default=False, help="Include full article content"
+    "--symbols",
+    type=str,
+    default=None,
+    help="[Optional] Comma-separated list of symbols to filter news by",
+)
+@click.option(
+    "--start",
+    type=str,
+    default=None,
+    help="[Optional] Start date in YYYY-MM-DD format",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=10,
+    help="[Optional] Maximum number of news items to return. Default: 10",
+)
+@click.option(
+    "--include-content/--no-content",
+    default=False,
+    help="[Optional] Include full article content in output. Default: --no-content",
 )
 @click.option(
     "--exclude-contentless/--include-contentless",
     default=False,
-    help="Exclude articles without content",
+    help="[Optional] Exclude articles without content. Default: --include-contentless",
 )
 def news(
     symbols: Optional[str],

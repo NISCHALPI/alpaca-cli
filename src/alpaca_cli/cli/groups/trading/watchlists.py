@@ -135,8 +135,19 @@ def create_watchlist(name: str, symbols: tuple) -> None:
 
 @watchlists.command("update")
 @click.argument("name_or_id")
-@click.option("--name", "new_name", help="New name for the watchlist")
-@click.option("--symbols", help="Comma-separated list of symbols to REPLACE items")
+@click.option(
+    "--name",
+    "new_name",
+    type=str,
+    default=None,
+    help="[Optional] New name for the watchlist",
+)
+@click.option(
+    "--symbols",
+    type=str,
+    default=None,
+    help="[Optional] Comma-separated list of symbols to REPLACE all items in watchlist",
+)
 def update_watchlist(
     name_or_id: str, new_name: Optional[str], symbols: Optional[str]
 ) -> None:

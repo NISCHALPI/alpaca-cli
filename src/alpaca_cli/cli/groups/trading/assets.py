@@ -21,24 +21,29 @@ def assets() -> None:
 @click.option(
     "--status",
     type=click.Choice(["active", "inactive"], case_sensitive=False),
-    help="Filter by status",
+    default=None,
+    help="[Optional] Filter by asset status. Choices: active, inactive",
 )
 @click.option(
     "--asset-class",
     "asset_class",
     type=click.Choice(["us_equity", "crypto", "us_option"], case_sensitive=False),
-    help="Filter by class",
+    default=None,
+    help="[Optional] Filter by asset class. Choices: us_equity, crypto, us_option",
 )
 @click.option(
     "--exchange",
     type=click.Choice(
         ["AMEX", "ARCA", "BATS", "NYSE", "NASDAQ", "IEX", "OTC"], case_sensitive=False
     ),
-    help="Filter by exchange",
+    default=None,
+    help="[Optional] Filter by exchange. Choices: AMEX, ARCA, BATS, NYSE, NASDAQ, IEX, OTC",
 )
 @click.option(
     "--attributes",
-    help="Comma-separated attributes (e.g., fractional,ptp_no_exception)",
+    type=str,
+    default=None,
+    help="[Optional] Comma-separated attributes filter (e.g., fractional,ptp_no_exception)",
 )
 def list_assets(
     status: Optional[str],

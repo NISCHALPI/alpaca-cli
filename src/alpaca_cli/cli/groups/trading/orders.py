@@ -1,7 +1,8 @@
+# type: ignore
 """Orders commands - Create, Get, Replace, Cancel orders."""
 
 import rich_click as click
-from typing import Optional, List, Any, Union
+from typing import Optional, Union
 from alpaca.trading.requests import (
     MarketOrderRequest,
     LimitOrderRequest,
@@ -18,31 +19,29 @@ from alpaca.common.enums import Sort
 from alpaca_cli.core.client import get_trading_client
 from alpaca_cli.cli.utils import print_table, format_currency, output_data
 from alpaca_cli.logger.logger import get_logger
+import json
+from alpaca_cli.core.client import get_stock_data_client, get_crypto_data_client
+from alpaca_cli.cli.utils import (
+    calculate_rebalancing_orders,
+    get_stock_latest_price_with_fallback,
+    get_crypto_latest_price_with_fallback,
+)
+
 
 logger = get_logger("trading.orders")
 
 
-def submit_order(order_data) -> None:
-    """Submit an order to the trading client."""
-    client = get_trading_client()
-    try:
-        type_name = order_data.__class__.__name__.replace("OrderRequest", "").upper()
-        logger.info(
-            f"Submitting {type_name} {order_data.side.name} order for {order_data.qty} {order_data.symbol}..."
-        )
-        order = client.submit_order(order_data=order_data)
-        logger.info(f"Order submitted successfully: {order.id}")
-        logger.info(f"Status: {order.status}")
-    except Exception as e:
-        logger.error(f"Failed to submit order: {e}")
+# =============================================================================
+# ORDER REQUEST BUILDERS
+# =============================================================================
 
 
-def build_bracket_params(
-    take_profit: Optional[float],
-    stop_loss: Optional[float],
-    stop_loss_limit: Optional[float],
+def _build_bracket_params(
+    take_profit: Optional[float] = None,
+    stop_loss: Optional[float] = None,
+    stop_loss_limit: Optional[float] = None,
 ) -> dict:
-    """Builds bracket order parameters."""
+    """Build bracket order parameters (take profit and stop loss)."""
     params = {}
     if take_profit:
         params["take_profit"] = TakeProfitRequest(limit_price=take_profit)
@@ -51,6 +50,180 @@ def build_bracket_params(
             stop_price=stop_loss, limit_price=stop_loss_limit
         )
     return params
+
+
+def create_market_order(
+    symbol: str,
+    side: OrderSide,
+    qty: Optional[float] = None,
+    notional: Optional[float] = None,
+    tif: str = "day",
+    client_order_id: Optional[str] = None,
+    take_profit: Optional[float] = None,
+    stop_loss: Optional[float] = None,
+    stop_loss_limit: Optional[float] = None,
+) -> MarketOrderRequest:
+    """Create a MarketOrderRequest."""
+    bracket = _build_bracket_params(take_profit, stop_loss, stop_loss_limit)
+    return MarketOrderRequest(
+        symbol=symbol.upper(),
+        qty=qty,
+        notional=notional,
+        side=side,
+        time_in_force=TimeInForce(tif),
+        client_order_id=client_order_id,
+        **bracket,
+    )
+
+
+def create_limit_order(
+    symbol: str,
+    side: OrderSide,
+    qty: float,
+    limit_price: float,
+    tif: str = "day",
+    extended_hours: bool = False,
+    client_order_id: Optional[str] = None,
+    take_profit: Optional[float] = None,
+    stop_loss: Optional[float] = None,
+    stop_loss_limit: Optional[float] = None,
+) -> LimitOrderRequest:
+    """Create a LimitOrderRequest."""
+    bracket = _build_bracket_params(take_profit, stop_loss, stop_loss_limit)
+    return LimitOrderRequest(
+        symbol=symbol.upper(),
+        qty=qty,
+        side=side,
+        time_in_force=TimeInForce(tif),
+        limit_price=limit_price,
+        extended_hours=extended_hours,
+        client_order_id=client_order_id,
+        **bracket,
+    )
+
+
+def create_stop_order(
+    symbol: str,
+    side: OrderSide,
+    qty: float,
+    stop_price: float,
+    limit_price: Optional[float] = None,
+    tif: str = "day",
+    extended_hours: bool = False,
+    client_order_id: Optional[str] = None,
+) -> Union[StopOrderRequest, StopLimitOrderRequest]:
+    """Create a StopOrderRequest or StopLimitOrderRequest."""
+    if limit_price:
+        return StopLimitOrderRequest(
+            symbol=symbol.upper(),
+            qty=qty,
+            side=side,
+            time_in_force=TimeInForce(tif),
+            stop_price=stop_price,
+            limit_price=limit_price,
+            extended_hours=extended_hours,
+            client_order_id=client_order_id,
+        )
+    return StopOrderRequest(
+        symbol=symbol.upper(),
+        qty=qty,
+        side=side,
+        time_in_force=TimeInForce(tif),
+        stop_price=stop_price,
+        extended_hours=extended_hours,
+        client_order_id=client_order_id,
+    )
+
+
+def create_trailing_stop_order(
+    symbol: str,
+    side: OrderSide,
+    qty: float,
+    trail_price: Optional[float] = None,
+    trail_percent: Optional[float] = None,
+    tif: str = "day",
+    extended_hours: bool = False,
+    client_order_id: Optional[str] = None,
+) -> TrailingStopOrderRequest:
+    """Create a TrailingStopOrderRequest."""
+    return TrailingStopOrderRequest(
+        symbol=symbol.upper(),
+        qty=qty,
+        side=side,
+        time_in_force=TimeInForce(tif),
+        trail_price=trail_price,
+        trail_percent=trail_percent,
+        extended_hours=extended_hours,
+        client_order_id=client_order_id,
+    )
+
+
+# =============================================================================
+# ORDER SUBMISSION & CANCELLATION
+# =============================================================================
+
+
+def submit_order(
+    order_request: Union[
+        MarketOrderRequest,
+        LimitOrderRequest,
+        StopOrderRequest,
+        StopLimitOrderRequest,
+        TrailingStopOrderRequest,
+    ],
+) -> None:
+    """Submit an order request to the trading client."""
+    client = get_trading_client()
+    try:
+        order_type = order_request.__class__.__name__.replace(
+            "OrderRequest", ""
+        ).upper()
+
+        # Format amount string for logging
+        if order_request.qty:
+            amount_str = f"{order_request.qty} shares of"
+        elif hasattr(order_request, "notional") and order_request.notional:
+            amount_str = f"${order_request.notional} of"
+        else:
+            amount_str = ""
+
+        logger.info(
+            f"Submitting {order_type} {order_request.side.name} order for {amount_str} {order_request.symbol}..."
+        )
+        order = client.submit_order(order_data=order_request)
+        logger.info(f"Order submitted successfully: {order.id}")
+        logger.info(f"Status: {order.status}")
+    except Exception as e:
+        logger.error(f"Failed to submit order: {e}")
+
+
+def cancel_order(order_id: str) -> None:
+    """Cancel a single order by ID."""
+    client = get_trading_client()
+    try:
+        logger.info(f"Cancelling order {order_id}...")
+        client.cancel_order_by_id(order_id)
+        logger.info(f"Order {order_id} cancelled.")
+    except Exception as e:
+        logger.error(f"Failed to cancel order: {e}")
+
+
+def cancel_all_orders() -> None:
+    """Cancel all open orders."""
+    client = get_trading_client()
+    logger.info("Cancelling ALL open orders...")
+    client.cancel_orders()
+    logger.info("Cancellation requested for all orders.")
+
+
+# Legacy alias for backward compatibility
+def build_bracket_params(
+    take_profit: Optional[float],
+    stop_loss: Optional[float],
+    stop_loss_limit: Optional[float],
+) -> dict:
+    """Builds bracket order parameters. (Legacy alias)"""
+    return _build_bracket_params(take_profit, stop_loss, stop_loss_limit)
 
 
 @click.group()
@@ -63,25 +236,69 @@ def orders() -> None:
 @orders.command("list")
 @click.option(
     "--status",
-    default="OPEN",
     type=click.Choice(["OPEN", "CLOSED", "ALL"], case_sensitive=False),
+    default="OPEN",
+    help="[Optional] Filter by order status. Choices: OPEN, CLOSED, ALL. Default: OPEN",
 )
-@click.option("--limit", default=50, help="Max number of orders")
-@click.option("--days", default=0, help="Filter orders from the last N days")
-@click.option("--direction", type=click.Choice(["asc", "desc"]), default="desc")
-@click.option("--side", type=click.Choice(["buy", "sell"], case_sensitive=False))
-@click.option("--symbols", help="Comma-separated list of symbols")
-@click.option("--nested/--no-nested", default=True, help="Roll up multi-leg orders")
+@click.option(
+    "--limit",
+    type=int,
+    default=50,
+    help="[Optional] Maximum number of orders to return. Default: 50",
+)
+@click.option(
+    "--days",
+    type=int,
+    default=0,
+    help="[Optional] Filter orders from the last N days. Default: 0 (no filter)",
+)
+@click.option(
+    "--direction",
+    type=click.Choice(["asc", "desc"]),
+    default="desc",
+    help="[Optional] Sort direction. Choices: asc, desc. Default: desc",
+)
+@click.option(
+    "--side",
+    type=click.Choice(["buy", "sell"], case_sensitive=False),
+    default=None,
+    help="[Optional] Filter by order side. Choices: buy, sell",
+)
+@click.option(
+    "--symbols",
+    type=str,
+    default=None,
+    help="[Optional] Comma-separated list of symbols to filter by",
+)
+@click.option(
+    "--nested/--no-nested",
+    default=True,
+    help="[Optional] Roll up multi-leg orders. Default: --nested",
+)
 @click.option(
     "--format",
     "output_format",
     type=click.Choice(["table", "json", "csv"]),
     default="table",
+    help="[Optional] Output format. Choices: table, json, csv. Default: table",
 )
-@click.option("--export", type=click.Path(), help="Export to file path")
+@click.option(
+    "--export",
+    type=click.Path(),
+    default=None,
+    help="[Optional] Export results to file path",
+)
 def list_orders(
-    status, limit, days, direction, side, symbols, nested, output_format, export
-):
+    status: str,
+    limit: int,
+    days: int,
+    direction: str,
+    side: Optional[str],
+    symbols: Optional[str],
+    nested: bool,
+    output_format: str,
+    export: Optional[str],
+) -> None:
     """Get orders with filtering."""
     from datetime import datetime, timedelta
 
@@ -112,14 +329,28 @@ def list_orders(
             logger.info(f"No {status} orders found.")
             return
 
+        # Use full ID for JSON/CSV, truncated for table display
+        def format_id(order_id: str) -> str:
+            if output_format == "table":
+                return str(order_id)[:8] + "..."
+            return str(order_id)
+
+        # Format qty/notional - show notional with $ prefix if qty is None
+        def format_qty(order) -> str:
+            if order.qty:
+                return str(order.qty)
+            elif hasattr(order, "notional") and order.notional:
+                return f"${order.notional}"
+            return "-"
+
         rows = [
             [
                 str(o.created_at.strftime("%Y-%m-%d %H:%M")),
-                str(o.id)[:8] + "...",
+                format_id(o.id),
                 o.symbol,
                 o.side.name,
                 o.type.name,
-                str(o.qty),
+                format_qty(o),
                 format_currency(o.filled_avg_price) if o.filled_avg_price else "-",
                 o.status.name,
             ]
@@ -128,7 +359,16 @@ def list_orders(
 
         output_data(
             f"{status} Orders",
-            ["Time", "ID", "Symbol", "Side", "Type", "Qty", "Fill Price", "Status"],
+            [
+                "Time",
+                "ID",
+                "Symbol",
+                "Side",
+                "Type",
+                "Qty/Notional",
+                "Fill Price",
+                "Status",
+            ],
             rows,
             output_format=output_format,
             export_path=export,
@@ -140,8 +380,13 @@ def list_orders(
 # --- GET ORDER ---
 @orders.command("get")
 @click.argument("order_id", required=False)
-@click.option("--client-order-id", help="Get order by client order ID instead")
-def get_order(order_id: Optional[str], client_order_id: Optional[str]):
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] Get order by client order ID instead of order ID",
+)
+def get_order(order_id: Optional[str], client_order_id: Optional[str]) -> None:
     """Get order details by ID or client order ID."""
     if not order_id and not client_order_id:
         logger.error("Must specify ORDER_ID or --client-order-id")
@@ -205,7 +450,7 @@ def get_order(order_id: Optional[str], client_order_id: Optional[str]):
                     str(l.qty),
                     l.status.name,
                 ]
-                for l in order.legs
+                for l in order.legs  # type: ignore
             ]
             print_table(
                 "Order Legs",
@@ -220,22 +465,18 @@ def get_order(order_id: Optional[str], client_order_id: Optional[str]):
 # --- CANCEL ORDER ---
 @orders.command("cancel")
 @click.argument("order_id", required=False)
-@click.option("--all", "cancel_all", is_flag=True, help="Cancel ALL open orders")
-def cancel_order(order_id: Optional[str], cancel_all: bool):
+@click.option(
+    "--all",
+    "cancel_all_flag",
+    is_flag=True,
+    help="[Optional] Cancel ALL open orders",
+)
+def cancel_order_cmd(order_id: Optional[str], cancel_all_flag: bool) -> None:
     """Cancel open orders."""
-    client = get_trading_client()
-
-    if cancel_all:
-        logger.info("Cancelling ALL open orders...")
-        client.cancel_orders()
-        logger.info("Cancellation requested for all orders.")
+    if cancel_all_flag:
+        cancel_all_orders()
     elif order_id:
-        logger.info(f"Cancelling order {order_id}...")
-        try:
-            client.cancel_order_by_id(order_id)
-            logger.info(f"Order {order_id} cancelled.")
-        except Exception as e:
-            logger.error(f"Failed to cancel order: {e}")
+        cancel_order(order_id)
     else:
         logger.error("Please specify an Order ID or use --all.")
 
@@ -243,15 +484,53 @@ def cancel_order(order_id: Optional[str], cancel_all: bool):
 # --- MODIFY ORDER ---
 @orders.command("modify")
 @click.argument("order_id")
-@click.option("--qty", type=float, help="New quantity")
-@click.option("--limit", "limit_price", type=float, help="New limit price")
-@click.option("--stop", "stop_price", type=float, help="New stop price")
-@click.option("--trail", type=float, help="New trail price")
 @click.option(
-    "--tif", type=click.Choice(["day", "gtc", "ioc", "fok"]), help="New time in force"
+    "--qty",
+    type=float,
+    default=None,
+    help="[Optional] New quantity for the order",
 )
-@click.option("--client-order-id", help="New client order ID")
-def modify_order(order_id, qty, limit_price, stop_price, trail, tif, client_order_id):
+@click.option(
+    "--limit",
+    "limit_price",
+    type=float,
+    default=None,
+    help="[Optional] New limit price for the order",
+)
+@click.option(
+    "--stop",
+    "stop_price",
+    type=float,
+    default=None,
+    help="[Optional] New stop price for the order",
+)
+@click.option(
+    "--trail",
+    type=float,
+    default=None,
+    help="[Optional] New trail price for trailing stop orders",
+)
+@click.option(
+    "--tif",
+    type=click.Choice(["day", "gtc", "ioc", "fok"]),
+    default=None,
+    help="[Optional] New time in force. Choices: day, gtc, ioc, fok",
+)
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] New client order ID",
+)
+def modify_order(
+    order_id: str,
+    qty: Optional[float],
+    limit_price: Optional[float],
+    stop_price: Optional[float],
+    trail: Optional[float],
+    tif: Optional[str],
+    client_order_id: Optional[str],
+) -> None:
     """Modify/replace an existing order."""
     if all(
         x is None for x in [qty, limit_price, stop_price, trail, tif, client_order_id]
@@ -287,32 +566,66 @@ def buy():
 @buy.command("market")
 @click.argument("symbol")
 @click.argument("qty", type=float, required=False)
-@click.option("--notional", type=float, help="Trade by dollar value")
+@click.option(
+    "--notional",
+    type=float,
+    default=None,
+    help="[Optional] Trade by dollar value instead of quantity",
+)
 @click.option(
     "--tif",
-    default="day",
     type=click.Choice(["day", "gtc", "opg", "cls", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, opg, cls, ioc, fok. Default: day",
 )
-@click.option("--client-order-id", help="Client Order ID")
-@click.option("--take-profit", type=float, help="Take Profit Limit Price")
-@click.option("--stop-loss", type=float, help="Stop Loss Stop Price")
-@click.option("--stop-loss-limit", type=float, help="Stop Loss Limit Price")
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] Custom client order ID for tracking",
+)
+@click.option(
+    "--take-profit",
+    type=float,
+    default=None,
+    help="[Optional] Take profit limit price for bracket order",
+)
+@click.option(
+    "--stop-loss",
+    type=float,
+    default=None,
+    help="[Optional] Stop loss stop price for bracket order",
+)
+@click.option(
+    "--stop-loss-limit",
+    type=float,
+    default=None,
+    help="[Optional] Stop loss limit price for bracket order",
+)
 def buy_market(
-    symbol, qty, notional, tif, client_order_id, take_profit, stop_loss, stop_loss_limit
-):
+    symbol: str,
+    qty: Optional[float],
+    notional: Optional[float],
+    tif: str,
+    client_order_id: Optional[str],
+    take_profit: Optional[float],
+    stop_loss: Optional[float],
+    stop_loss_limit: Optional[float],
+) -> None:
     """Place a MARKET buy order."""
     if qty is None and notional is None:
         logger.error("Must specify QTY or --notional")
         return
-    bracket = build_bracket_params(take_profit, stop_loss, stop_loss_limit)
-    req = MarketOrderRequest(
-        symbol=symbol.upper(),
+    req = create_market_order(
+        symbol=symbol,
+        side=OrderSide.BUY,
         qty=qty,
         notional=notional,
-        side=OrderSide.BUY,
-        time_in_force=TimeInForce(tif),
+        tif=tif,
         client_order_id=client_order_id,
-        **bracket,
+        take_profit=take_profit,
+        stop_loss=stop_loss,
+        stop_loss_limit=stop_loss_limit,
     )
     submit_order(req)
 
@@ -323,36 +636,62 @@ def buy_market(
 @click.argument("limit_price", type=float)
 @click.option(
     "--tif",
-    default="day",
     type=click.Choice(["day", "gtc", "opg", "cls", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, opg, cls, ioc, fok. Default: day",
 )
-@click.option("--extended-hours", is_flag=True)
-@click.option("--client-order-id")
-@click.option("--take-profit", type=float)
-@click.option("--stop-loss", type=float)
-@click.option("--stop-loss-limit", type=float)
+@click.option(
+    "--extended-hours",
+    is_flag=True,
+    help="[Optional] Allow execution during extended hours",
+)
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] Custom client order ID for tracking",
+)
+@click.option(
+    "--take-profit",
+    type=float,
+    default=None,
+    help="[Optional] Take profit limit price for bracket order",
+)
+@click.option(
+    "--stop-loss",
+    type=float,
+    default=None,
+    help="[Optional] Stop loss stop price for bracket order",
+)
+@click.option(
+    "--stop-loss-limit",
+    type=float,
+    default=None,
+    help="[Optional] Stop loss limit price for bracket order",
+)
 def buy_limit(
-    symbol,
-    qty,
-    limit_price,
-    tif,
-    extended_hours,
-    client_order_id,
-    take_profit,
-    stop_loss,
-    stop_loss_limit,
-):
+    symbol: str,
+    qty: float,
+    limit_price: float,
+    tif: str,
+    extended_hours: bool,
+    client_order_id: Optional[str],
+    take_profit: Optional[float],
+    stop_loss: Optional[float],
+    stop_loss_limit: Optional[float],
+) -> None:
     """Place a LIMIT buy order."""
-    bracket = build_bracket_params(take_profit, stop_loss, stop_loss_limit)
-    req = LimitOrderRequest(
-        symbol=symbol.upper(),
-        qty=qty,
+    req = create_limit_order(
+        symbol=symbol,
         side=OrderSide.BUY,
-        time_in_force=TimeInForce(tif),
+        qty=qty,
         limit_price=limit_price,
+        tif=tif,
         extended_hours=extended_hours,
         client_order_id=client_order_id,
-        **bracket,
+        take_profit=take_profit,
+        stop_loss=stop_loss,
+        stop_loss_limit=stop_loss_limit,
     )
     submit_order(req)
 
@@ -361,68 +700,105 @@ def buy_limit(
 @click.argument("symbol")
 @click.argument("qty", type=float)
 @click.argument("stop_price", type=float)
-@click.option("--limit", "limit_price", type=float, help="Convert to Stop-Limit")
+@click.option(
+    "--limit",
+    "limit_price",
+    type=float,
+    default=None,
+    help="[Optional] Add limit price to convert to stop-limit order",
+)
 @click.option(
     "--tif",
-    default="day",
     type=click.Choice(["day", "gtc", "opg", "cls", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, opg, cls, ioc, fok. Default: day",
 )
-@click.option("--extended-hours", is_flag=True)
-@click.option("--client-order-id")
+@click.option(
+    "--extended-hours",
+    is_flag=True,
+    help="[Optional] Allow execution during extended hours",
+)
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] Custom client order ID for tracking",
+)
 def buy_stop(
-    symbol, qty, stop_price, limit_price, tif, extended_hours, client_order_id
-):
+    symbol: str,
+    qty: float,
+    stop_price: float,
+    limit_price: Optional[float],
+    tif: str,
+    extended_hours: bool,
+    client_order_id: Optional[str],
+) -> None:
     """Place a STOP or STOP-LIMIT buy order."""
-    if limit_price:
-        req = StopLimitOrderRequest(
-            symbol=symbol.upper(),
-            qty=qty,
-            side=OrderSide.BUY,
-            time_in_force=TimeInForce(tif),
-            stop_price=stop_price,
-            limit_price=limit_price,
-            extended_hours=extended_hours,
-            client_order_id=client_order_id,
-        )
-    else:
-        req = StopOrderRequest(
-            symbol=symbol.upper(),
-            qty=qty,
-            side=OrderSide.BUY,
-            time_in_force=TimeInForce(tif),
-            stop_price=stop_price,
-            extended_hours=extended_hours,
-            client_order_id=client_order_id,
-        )
+    req = create_stop_order(
+        symbol=symbol,
+        side=OrderSide.BUY,
+        qty=qty,
+        stop_price=stop_price,
+        limit_price=limit_price,
+        tif=tif,
+        extended_hours=extended_hours,
+        client_order_id=client_order_id,
+    )
     submit_order(req)
 
 
 @buy.command("trailing")
 @click.argument("symbol")
 @click.argument("qty", type=float)
-@click.option("--trail-price", type=float)
-@click.option("--trail-percent", type=float)
+@click.option(
+    "--trail-price",
+    type=float,
+    default=None,
+    help="[Optional] Trail amount in dollars (mutually exclusive with --trail-percent)",
+)
+@click.option(
+    "--trail-percent",
+    type=float,
+    default=None,
+    help="[Optional] Trail amount as percentage (mutually exclusive with --trail-price)",
+)
 @click.option(
     "--tif",
-    default="day",
     type=click.Choice(["day", "gtc", "opg", "cls", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, opg, cls, ioc, fok. Default: day",
 )
-@click.option("--extended-hours", is_flag=True)
-@click.option("--client-order-id")
+@click.option(
+    "--extended-hours",
+    is_flag=True,
+    help="[Optional] Allow execution during extended hours",
+)
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] Custom client order ID for tracking",
+)
 def buy_trailing(
-    symbol, qty, trail_price, trail_percent, tif, extended_hours, client_order_id
-):
+    symbol: str,
+    qty: float,
+    trail_price: Optional[float],
+    trail_percent: Optional[float],
+    tif: str,
+    extended_hours: bool,
+    client_order_id: Optional[str],
+) -> None:
     """Place a TRAILING STOP buy order."""
     if not trail_price and not trail_percent:
         logger.error("Must specify --trail-price or --trail-percent")
         return
-    req = TrailingStopOrderRequest(
-        symbol=symbol.upper(),
-        qty=qty,
+    req = create_trailing_stop_order(
+        symbol=symbol,
         side=OrderSide.BUY,
-        time_in_force=TimeInForce(tif),
+        qty=qty,
         trail_price=trail_price,
         trail_percent=trail_percent,
+        tif=tif,
         extended_hours=extended_hours,
         client_order_id=client_order_id,
     )
@@ -439,32 +815,66 @@ def sell():
 @sell.command("market")
 @click.argument("symbol")
 @click.argument("qty", type=float, required=False)
-@click.option("--notional", type=float)
+@click.option(
+    "--notional",
+    type=float,
+    default=None,
+    help="[Optional] Trade by dollar value instead of quantity",
+)
 @click.option(
     "--tif",
-    default="day",
     type=click.Choice(["day", "gtc", "opg", "cls", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, opg, cls, ioc, fok. Default: day",
 )
-@click.option("--client-order-id")
-@click.option("--take-profit", type=float)
-@click.option("--stop-loss", type=float)
-@click.option("--stop-loss-limit", type=float)
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] Custom client order ID for tracking",
+)
+@click.option(
+    "--take-profit",
+    type=float,
+    default=None,
+    help="[Optional] Take profit limit price for bracket order",
+)
+@click.option(
+    "--stop-loss",
+    type=float,
+    default=None,
+    help="[Optional] Stop loss stop price for bracket order",
+)
+@click.option(
+    "--stop-loss-limit",
+    type=float,
+    default=None,
+    help="[Optional] Stop loss limit price for bracket order",
+)
 def sell_market(
-    symbol, qty, notional, tif, client_order_id, take_profit, stop_loss, stop_loss_limit
-):
+    symbol: str,
+    qty: Optional[float],
+    notional: Optional[float],
+    tif: str,
+    client_order_id: Optional[str],
+    take_profit: Optional[float],
+    stop_loss: Optional[float],
+    stop_loss_limit: Optional[float],
+) -> None:
     """Place a MARKET sell order."""
     if qty is None and notional is None:
         logger.error("Must specify QTY or --notional")
         return
-    bracket = build_bracket_params(take_profit, stop_loss, stop_loss_limit)
-    req = MarketOrderRequest(
-        symbol=symbol.upper(),
+    req = create_market_order(
+        symbol=symbol,
+        side=OrderSide.SELL,
         qty=qty,
         notional=notional,
-        side=OrderSide.SELL,
-        time_in_force=TimeInForce(tif),
+        tif=tif,
         client_order_id=client_order_id,
-        **bracket,
+        take_profit=take_profit,
+        stop_loss=stop_loss,
+        stop_loss_limit=stop_loss_limit,
     )
     submit_order(req)
 
@@ -475,36 +885,62 @@ def sell_market(
 @click.argument("limit_price", type=float)
 @click.option(
     "--tif",
-    default="day",
     type=click.Choice(["day", "gtc", "opg", "cls", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, opg, cls, ioc, fok. Default: day",
 )
-@click.option("--extended-hours", is_flag=True)
-@click.option("--client-order-id")
-@click.option("--take-profit", type=float)
-@click.option("--stop-loss", type=float)
-@click.option("--stop-loss-limit", type=float)
+@click.option(
+    "--extended-hours",
+    is_flag=True,
+    help="[Optional] Allow execution during extended hours",
+)
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] Custom client order ID for tracking",
+)
+@click.option(
+    "--take-profit",
+    type=float,
+    default=None,
+    help="[Optional] Take profit limit price for bracket order",
+)
+@click.option(
+    "--stop-loss",
+    type=float,
+    default=None,
+    help="[Optional] Stop loss stop price for bracket order",
+)
+@click.option(
+    "--stop-loss-limit",
+    type=float,
+    default=None,
+    help="[Optional] Stop loss limit price for bracket order",
+)
 def sell_limit(
-    symbol,
-    qty,
-    limit_price,
-    tif,
-    extended_hours,
-    client_order_id,
-    take_profit,
-    stop_loss,
-    stop_loss_limit,
-):
+    symbol: str,
+    qty: float,
+    limit_price: float,
+    tif: str,
+    extended_hours: bool,
+    client_order_id: Optional[str],
+    take_profit: Optional[float],
+    stop_loss: Optional[float],
+    stop_loss_limit: Optional[float],
+) -> None:
     """Place a LIMIT sell order."""
-    bracket = build_bracket_params(take_profit, stop_loss, stop_loss_limit)
-    req = LimitOrderRequest(
-        symbol=symbol.upper(),
-        qty=qty,
+    req = create_limit_order(
+        symbol=symbol,
         side=OrderSide.SELL,
-        time_in_force=TimeInForce(tif),
+        qty=qty,
         limit_price=limit_price,
+        tif=tif,
         extended_hours=extended_hours,
         client_order_id=client_order_id,
-        **bracket,
+        take_profit=take_profit,
+        stop_loss=stop_loss,
+        stop_loss_limit=stop_loss_limit,
     )
     submit_order(req)
 
@@ -513,68 +949,105 @@ def sell_limit(
 @click.argument("symbol")
 @click.argument("qty", type=float)
 @click.argument("stop_price", type=float)
-@click.option("--limit", "limit_price", type=float)
+@click.option(
+    "--limit",
+    "limit_price",
+    type=float,
+    default=None,
+    help="[Optional] Add limit price to convert to stop-limit order",
+)
 @click.option(
     "--tif",
-    default="day",
     type=click.Choice(["day", "gtc", "opg", "cls", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, opg, cls, ioc, fok. Default: day",
 )
-@click.option("--extended-hours", is_flag=True)
-@click.option("--client-order-id")
+@click.option(
+    "--extended-hours",
+    is_flag=True,
+    help="[Optional] Allow execution during extended hours",
+)
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] Custom client order ID for tracking",
+)
 def sell_stop(
-    symbol, qty, stop_price, limit_price, tif, extended_hours, client_order_id
-):
+    symbol: str,
+    qty: float,
+    stop_price: float,
+    limit_price: Optional[float],
+    tif: str,
+    extended_hours: bool,
+    client_order_id: Optional[str],
+) -> None:
     """Place a STOP or STOP-LIMIT sell order."""
-    if limit_price:
-        req = StopLimitOrderRequest(
-            symbol=symbol.upper(),
-            qty=qty,
-            side=OrderSide.SELL,
-            time_in_force=TimeInForce(tif),
-            stop_price=stop_price,
-            limit_price=limit_price,
-            extended_hours=extended_hours,
-            client_order_id=client_order_id,
-        )
-    else:
-        req = StopOrderRequest(
-            symbol=symbol.upper(),
-            qty=qty,
-            side=OrderSide.SELL,
-            time_in_force=TimeInForce(tif),
-            stop_price=stop_price,
-            extended_hours=extended_hours,
-            client_order_id=client_order_id,
-        )
+    req = create_stop_order(
+        symbol=symbol,
+        side=OrderSide.SELL,
+        qty=qty,
+        stop_price=stop_price,
+        limit_price=limit_price,
+        tif=tif,
+        extended_hours=extended_hours,
+        client_order_id=client_order_id,
+    )
     submit_order(req)
 
 
 @sell.command("trailing")
 @click.argument("symbol")
 @click.argument("qty", type=float)
-@click.option("--trail-price", type=float)
-@click.option("--trail-percent", type=float)
+@click.option(
+    "--trail-price",
+    type=float,
+    default=None,
+    help="[Optional] Trail amount in dollars (mutually exclusive with --trail-percent)",
+)
+@click.option(
+    "--trail-percent",
+    type=float,
+    default=None,
+    help="[Optional] Trail amount as percentage (mutually exclusive with --trail-price)",
+)
 @click.option(
     "--tif",
-    default="day",
     type=click.Choice(["day", "gtc", "opg", "cls", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, opg, cls, ioc, fok. Default: day",
 )
-@click.option("--extended-hours", is_flag=True)
-@click.option("--client-order-id")
+@click.option(
+    "--extended-hours",
+    is_flag=True,
+    help="[Optional] Allow execution during extended hours",
+)
+@click.option(
+    "--client-order-id",
+    type=str,
+    default=None,
+    help="[Optional] Custom client order ID for tracking",
+)
 def sell_trailing(
-    symbol, qty, trail_price, trail_percent, tif, extended_hours, client_order_id
-):
+    symbol: str,
+    qty: float,
+    trail_price: Optional[float],
+    trail_percent: Optional[float],
+    tif: str,
+    extended_hours: bool,
+    client_order_id: Optional[str],
+) -> None:
     """Place a TRAILING STOP sell order."""
     if not trail_price and not trail_percent:
         logger.error("Must specify --trail-price or --trail-percent")
         return
-    req = TrailingStopOrderRequest(
-        symbol=symbol.upper(),
-        qty=qty,
+    req = create_trailing_stop_order(
+        symbol=symbol,
         side=OrderSide.SELL,
-        time_in_force=TimeInForce(tif),
+        qty=qty,
         trail_price=trail_price,
         trail_percent=trail_percent,
+        tif=tif,
         extended_hours=extended_hours,
         client_order_id=client_order_id,
     )
@@ -584,23 +1057,52 @@ def sell_trailing(
 # --- REBALANCE ---
 @orders.command("rebalance")
 @click.argument("target_weights_path", type=click.Path(exists=True))
-@click.option("--allow-short", is_flag=True, help="Allow short selling if needed")
 @click.option(
-    "--dry-run/--execute", default=True, help="Simulate orders without executing"
+    "--allow-short",
+    is_flag=True,
+    help="[Optional] Allow short selling if needed for rebalancing",
 )
-@click.option("--force", is_flag=True, help="Force execution even if market is closed")
-@click.option("--order-type", type=click.Choice(["market", "limit"]), default="market")
-@click.option("--tif", type=click.Choice(["day", "gtc", "ioc", "fok"]), default="day")
-@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
-def rebalance(target_weights_path, allow_short, dry_run, force, order_type, tif, yes):
+@click.option(
+    "--dry-run/--execute",
+    default=True,
+    help="[Optional] Simulate orders without executing. Default: --dry-run",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="[Optional] Force execution even if market is closed",
+)
+@click.option(
+    "--order-type",
+    type=click.Choice(["market", "limit"]),
+    default="market",
+    help="[Optional] Order type for rebalancing. Choices: market, limit. Default: market",
+)
+@click.option(
+    "--tif",
+    type=click.Choice(["day", "gtc", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, ioc, fok. Default: day",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="[Optional] Skip confirmation prompt",
+)
+def rebalance(
+    target_weights_path: str,
+    allow_short: bool,
+    dry_run: bool,
+    force: bool,
+    order_type: str,
+    tif: str,
+    yes: bool,
+) -> None:
     """Rebalance portfolio based on target weights JSON file.
 
     TARGET_WEIGHTS_PATH: Path to JSON file with target weights, e.g. {"AAPL": 0.5, "CASH": 0.5}
     """
-    import json
-    from alpaca.data.requests import StockLatestQuoteRequest, CryptoLatestQuoteRequest
-    from alpaca_cli.core.client import get_stock_data_client, get_crypto_data_client
-    from alpaca_cli.cli.utils import calculate_rebalancing_orders
 
     logger.info(f"Rebalancing portfolio (Dry Run: {dry_run})...")
 
@@ -616,14 +1118,34 @@ def rebalance(target_weights_path, allow_short, dry_run, force, order_type, tif,
         logger.error("Invalid weights format. Must be a JSON dictionary.")
         return
 
+    # Validate weights before processing
+    non_cash_weights = {k: v for k, v in target_weights.items() if k != "CASH"}
+    non_cash_sum = sum(non_cash_weights.values())
+
+    # Check for negative weights
+    for sym, weight in non_cash_weights.items():
+        if weight < 0:
+            logger.error(f"Invalid negative weight for {sym}: {weight}")
+            return
+
+    # Check if weights exceed 100%
+    if non_cash_sum > 1.0 + 1e-9:  # Small epsilon for floating point
+        logger.error(
+            f"Total weight ({non_cash_sum:.2%}) exceeds 100%. "
+            f"Please adjust your weights. Current weights:"
+        )
+        for sym, weight in non_cash_weights.items():
+            logger.error(f"  {sym}: {weight:.2%}")
+        return
+
     # Auto-calculate CASH if not specified
     if "CASH" not in target_weights:
-        target_weights["CASH"] = 1.0 - sum(target_weights.values())
+        target_weights["CASH"] = 1.0 - non_cash_sum
         logger.info(
             f"'CASH' not specified, calculated as: {target_weights['CASH']:.2%}"
         )
 
-    # Validate total
+    # Validate total equals 100%
     total_weight = sum(target_weights.values())
     if not (0.99 <= total_weight <= 1.01):
         logger.error(
@@ -671,11 +1193,10 @@ def rebalance(target_weights_path, allow_short, dry_run, force, order_type, tif,
     if stock_symbols:
         try:
             stock_client = get_stock_data_client()
-            quotes = stock_client.get_stock_latest_quote(
-                StockLatestQuoteRequest(symbol_or_symbols=list(stock_symbols))
+            stock_prices = get_stock_latest_price_with_fallback(
+                list(stock_symbols), stock_client
             )
-            for sym, q in quotes.items():
-                current_prices[sym] = (q.bid_price + q.ask_price) / 2
+            current_prices.update(stock_prices)
         except Exception as e:
             logger.error(f"Failed to fetch stock prices: {e}")
             return
@@ -683,11 +1204,10 @@ def rebalance(target_weights_path, allow_short, dry_run, force, order_type, tif,
     if crypto_symbols:
         try:
             crypto_client = get_crypto_data_client()
-            quotes = crypto_client.get_crypto_latest_quote(
-                CryptoLatestQuoteRequest(symbol_or_symbols=list(crypto_symbols))
+            crypto_prices = get_crypto_latest_price_with_fallback(
+                list(crypto_symbols), crypto_client
             )
-            for sym, q in quotes.items():
-                current_prices[sym] = (q.bid_price + q.ask_price) / 2
+            current_prices.update(crypto_prices)
         except Exception as e:
             logger.error(f"Failed to fetch crypto prices: {e}")
             return
@@ -722,7 +1242,55 @@ def rebalance(target_weights_path, allow_short, dry_run, force, order_type, tif,
 
     # Dry run display
     if dry_run:
-        logger.info("Dry Run Mode - Orders to be placed:")
+        logger.info("Dry Run Mode - Portfolio Analysis:")
+
+        # Build market value breakdown table
+        value_rows = []
+        for symbol in sorted(all_symbols):
+            current_qty = current_positions.get(symbol, 0)
+            price = current_prices.get(symbol, 0)
+            current_value = current_qty * price
+            current_weight = current_value / current_equity if current_equity > 0 else 0
+
+            target_weight = target_weights.get(symbol, 0)
+            target_value = target_weight * current_equity
+
+            value_rows.append(
+                [
+                    symbol,
+                    f"{current_weight:.2%}",
+                    f"{target_weight:.2%}",
+                    format_currency(current_value),
+                    format_currency(target_value),
+                ]
+            )
+
+        # Add CASH row
+        cash_current_value = current_equity - sum(
+            current_positions.get(s, 0) * current_prices.get(s, 0) for s in all_symbols
+        )
+        cash_current_weight = (
+            cash_current_value / current_equity if current_equity > 0 else 0
+        )
+        cash_target_weight = target_weights.get("CASH", 0)
+        cash_target_value = cash_target_weight * current_equity
+        value_rows.append(
+            [
+                "CASH",
+                f"{cash_current_weight:.2%}",
+                f"{cash_target_weight:.2%}",
+                format_currency(cash_current_value),
+                format_currency(cash_target_value),
+            ]
+        )
+
+        print_table(
+            f"Market Value Breakdown (Equity: {format_currency(current_equity)})",
+            ["Symbol", "Current %", "Target %", "Current Value", "Target Value"],
+            value_rows,
+        )
+
+        logger.info("Orders to be placed:")
         rows = [
             [o["symbol"], o["side"].upper(), f"{o['qty']:.4f}", order_type.upper()]
             for o in sorted_orders
@@ -741,25 +1309,25 @@ def rebalance(target_weights_path, allow_short, dry_run, force, order_type, tif,
             logger.info("Cancelled.")
             return
 
-    # Execute orders
-    tif_enum = TimeInForce(tif)
+    # Execute orders using the unified order builders
     for o in sorted_orders:
         try:
+            side = OrderSide.BUY if o["side"] == "buy" else OrderSide.SELL
             if order_type == "market":
-                req = MarketOrderRequest(
+                req = create_market_order(
                     symbol=o["symbol"],
+                    side=side,
                     qty=o["qty"],
-                    side=OrderSide.BUY if o["side"] == "buy" else OrderSide.SELL,
-                    time_in_force=tif_enum,
+                    tif=tif,
                 )
             else:
                 price = current_prices.get(o["symbol"])
-                req = LimitOrderRequest(
+                req = create_limit_order(
                     symbol=o["symbol"],
+                    side=side,
                     qty=o["qty"],
-                    side=OrderSide.BUY if o["side"] == "buy" else OrderSide.SELL,
-                    time_in_force=tif_enum,
                     limit_price=price,
+                    tif=tif,
                 )
             submit_order(req)
         except Exception as e:

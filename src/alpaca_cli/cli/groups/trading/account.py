@@ -56,29 +56,41 @@ def status() -> None:
 @click.option(
     "--dtbp-check",
     type=click.Choice(["both", "entry", "exit"]),
-    help="Day trade buying power check",
+    default=None,
+    help="[Optional] Day trade buying power check. Choices: both, entry, exit",
 )
 @click.option(
     "--trade-confirm",
     type=click.Choice(["all", "none"]),
-    help="Trade confirmation emails",
+    default=None,
+    help="[Optional] Trade confirmation email setting. Choices: all, none",
 )
 @click.option(
-    "--suspend-trade/--resume-trade", default=None, help="Suspend/resume trading"
+    "--suspend-trade/--resume-trade",
+    default=None,
+    help="[Optional] Suspend or resume trading on the account",
 )
-@click.option("--shorting/--no-shorting", default=None, help="Enable/disable shorting")
+@click.option(
+    "--shorting/--no-shorting",
+    default=None,
+    help="[Optional] Enable or disable short selling",
+)
 @click.option(
     "--fractional/--no-fractional",
     default=None,
-    help="Enable/disable fractional trading",
+    help="[Optional] Enable or disable fractional share trading",
 )
 @click.option(
-    "--max-margin-multiplier", type=float, help="Max margin multiplier (1, 2, or 4)"
+    "--max-margin-multiplier",
+    type=float,
+    default=None,
+    help="[Optional] Maximum margin multiplier. Choices: 1, 2, or 4",
 )
 @click.option(
     "--pdt-check",
     type=click.Choice(["entry", "exit", "both"]),
-    help="PDT check setting",
+    default=None,
+    help="[Optional] Pattern day trader check setting. Choices: entry, exit, both",
 )
 def config(
     dtbp_check: Optional[str],
@@ -158,23 +170,45 @@ def config(
 
 @account.command("history")
 @click.option(
-    "--period", default="1M", help="Duration of data (1D, 1W, 1M, 3M, 6M, 1A, all)"
+    "--period",
+    type=str,
+    default="1M",
+    help="[Optional] Duration of data. Choices: 1D, 1W, 1M, 3M, 6M, 1A, all. Default: 1M",
 )
 @click.option(
-    "--timeframe", default="1D", help="Resolution of data (1Min, 5Min, 15Min, 1H, 1D)"
+    "--timeframe",
+    type=str,
+    default="1D",
+    help="[Optional] Resolution of data. Choices: 1Min, 5Min, 15Min, 1H, 1D. Default: 1D",
 )
-@click.option("--date-end", help="End date (YYYY-MM-DD) [UTC]")
-@click.option("--extended/--no-extended", default=False, help="Include extended hours")
-@click.option("--start", default=None, help="Start datetime (RFC3339 format)")
+@click.option(
+    "--date-end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format (UTC)",
+)
+@click.option(
+    "--extended/--no-extended",
+    default=False,
+    help="[Optional] Include extended trading hours data. Default: --no-extended",
+)
+@click.option(
+    "--start",
+    type=str,
+    default=None,
+    help="[Optional] Start datetime in RFC3339 format (e.g., 2024-01-01T09:00:00-05:00)",
+)
 @click.option(
     "--intraday-reporting",
     type=click.Choice(["market_hours", "extended_hours", "continuous"]),
-    help="Timestamps to return for intraday data",
+    default=None,
+    help="[Optional] Timestamps to return for intraday data. Choices: market_hours, extended_hours, continuous",
 )
 @click.option(
     "--pnl-reset",
     type=click.Choice(["per_day", "no_reset"]),
-    help="Baseline for P/L calculation",
+    default=None,
+    help="[Optional] Baseline for P/L calculation. Choices: per_day, no_reset",
 )
 def history(
     period: str,

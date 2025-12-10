@@ -14,43 +14,53 @@ click.rich_click.USE_RICH_MARKUP = True
 configure_logging()
 
 
+def get_version_info() -> str:
+    """Get version information for CLI and dependencies."""
+    from importlib.metadata import version, PackageNotFoundError
+
+    try:
+        cli_version = version("alpaca-cli")
+    except PackageNotFoundError:
+        cli_version = "dev"
+
+    try:
+        alpaca_version = version("alpaca-py")
+    except PackageNotFoundError:
+        alpaca_version = "unknown"
+
+    click.echo(f"Alpaca CLI: v{cli_version}")
+    click.echo(f"Alpaca-py: v{alpaca_version}", nl=False)
+
+
+def version_callback(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    """Custom version callback to show both CLI and API versions."""
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo(get_version_info())
+    ctx.exit()
+
+
 @click.group()
 @click.option("--debug", is_flag=True, help="Enable debug logging")
-@click.version_option(package_name="alpaca-cli")
+@click.option(
+    "--version",
+    "-V",
+    is_flag=True,
+    callback=version_callback,
+    expose_value=False,
+    is_eager=True,
+    help="Show version information",
+)
 def cli(debug: bool) -> None:
-    """Alpaca CLI Trading Tool.
+    """
+    [bold cyan]Alpaca CLI Trading Tool[/bold cyan] - Command-line interface for Alpaca Markets API.
 
-    Command Structure (mirrors Alpaca Python SDK):
+    Use [green]trading[/green] for account, positions, orders, and assets management.
+    Use [green]data[/green] for market data (stock, crypto, options, news).
 
-    TRADING:
-      trading account     - Account status, config, activities, history
-      trading positions   - Position management (list, get, close, exercise)
-      trading orders      - Order management (list, get, cancel, modify, buy, sell)
-      trading assets      - Asset lookup
-      trading contracts   - Option contracts
-      trading watchlists  - Watchlist CRUD
-      trading clock       - Market clock
-      trading calendar    - Market calendar
-      trading corporate-actions - Corporate actions
-      trading stream      - Real-time order updates
+    [dim]Quick aliases: buy, sell, pos, status, quote, clock[/dim]
 
-    DATA:
-      data stock      - Stock bars, quotes, trades, latest, snapshot, stream
-      data crypto     - Crypto bars, quotes, trades, latest, snapshot, orderbook, stream
-      data options    - Option bars, trades, latest, snapshot, chain, exchanges
-      data screeners  - Market movers, most actives
-      data news       - Market news
-      data corporate-actions - Corporate actions data
-
-    Quick Aliases:
-      buy       - trading orders buy market
-      sell      - trading orders sell market
-      pos       - trading positions list
-      status    - trading account status
-      quote     - data stock latest (get current price)
-
-    Shell Completion:
-      Run 'alpaca-cli --install-completion' to enable tab completion.
+    [dim]Shell completion: eval "$(_ALPACA_CLI_COMPLETE=bash_source alpaca-cli)"[/dim]
     """
     if debug:
         import logging

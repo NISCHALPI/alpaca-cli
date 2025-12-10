@@ -50,14 +50,42 @@ def crypto() -> None:
 @click.option(
     "--timeframe",
     "-t",
+    type=str,
     default="1Day",
-    help="Timeframe (1Min, 1Hour, 1Day, 1Week, 1Month)",
+    help="[Optional] Timeframe for bars. Choices: 1Min, 1Hour, 1Day, 1Week, 1Month. Default: 1Day",
 )
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=100, help="Number of bars")
-@click.option("--sort", type=click.Choice(["asc", "desc"]))
-def crypto_bars(symbols, timeframe, start, end, limit, sort):
+@click.option(
+    "--start",
+    type=str,
+    default=None,
+    help="[Optional] Start date in YYYY-MM-DD format. Default: end date minus limit days",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format. Default: current date",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=100,
+    help="[Optional] Maximum number of bars to return. Default: 100",
+)
+@click.option(
+    "--sort",
+    type=click.Choice(["asc", "desc"]),
+    default=None,
+    help="[Optional] Sort order for results. Choices: asc, desc",
+)
+def crypto_bars(
+    symbols: str,
+    timeframe: str,
+    start: Optional[str],
+    end: Optional[str],
+    limit: int,
+    sort: Optional[str],
+) -> None:
     """Get historical crypto bars (OHLCV)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -117,11 +145,37 @@ def crypto_bars(symbols, timeframe, start, end, limit, sort):
 
 @crypto.command("quotes")
 @click.argument("symbols")
-@click.option("--start", required=True, help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=100, help="Number of quotes")
-@click.option("--sort", type=click.Choice(["asc", "desc"]))
-def crypto_quotes(symbols, start, end, limit, sort):
+@click.option(
+    "--start",
+    type=str,
+    required=True,
+    help="[Required] Start date in YYYY-MM-DD format",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format. Default: current date",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=100,
+    help="[Optional] Maximum number of quotes to return. Default: 100",
+)
+@click.option(
+    "--sort",
+    type=click.Choice(["asc", "desc"]),
+    default=None,
+    help="[Optional] Sort order for results. Choices: asc, desc",
+)
+def crypto_quotes(
+    symbols: str,
+    start: str,
+    end: Optional[str],
+    limit: int,
+    sort: Optional[str],
+) -> None:
     """Get historical crypto quotes."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -170,11 +224,37 @@ def crypto_quotes(symbols, start, end, limit, sort):
 
 @crypto.command("trades")
 @click.argument("symbols")
-@click.option("--start", required=True, help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=100, help="Number of trades")
-@click.option("--sort", type=click.Choice(["asc", "desc"]))
-def crypto_trades(symbols, start, end, limit, sort):
+@click.option(
+    "--start",
+    type=str,
+    required=True,
+    help="[Required] Start date in YYYY-MM-DD format",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format. Default: current date",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=100,
+    help="[Optional] Maximum number of trades to return. Default: 100",
+)
+@click.option(
+    "--sort",
+    type=click.Choice(["asc", "desc"]),
+    default=None,
+    help="[Optional] Sort order for results. Choices: asc, desc",
+)
+def crypto_trades(
+    symbols: str,
+    start: str,
+    end: Optional[str],
+    limit: int,
+    sort: Optional[str],
+) -> None:
     """Get historical crypto trades."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -220,7 +300,7 @@ def crypto_trades(symbols, start, end, limit, sort):
 
 @crypto.command("latest")
 @click.argument("symbols")
-def crypto_latest(symbols):
+def crypto_latest(symbols: str) -> None:
     """Get latest crypto quote, trade, and bar."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -265,7 +345,7 @@ def crypto_latest(symbols):
 
 @crypto.command("snapshot")
 @click.argument("symbols")
-def crypto_snapshot(symbols):
+def crypto_snapshot(symbols: str) -> None:
     """Get crypto snapshot (quote, trade, bar, prev close)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -321,7 +401,7 @@ def crypto_snapshot(symbols):
 
 @crypto.command("orderbook")
 @click.argument("symbols")
-def crypto_orderbook(symbols):
+def crypto_orderbook(symbols: str) -> None:
     """Get crypto orderbook (bid/ask depth)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
@@ -348,8 +428,10 @@ def crypto_orderbook(symbols):
 
 @crypto.command("stream")
 @click.argument("symbols")
-def crypto_stream(symbols):
+def crypto_stream(symbols: str) -> None:
     """Stream live crypto quotes and trades."""
+    import logging as stdlib_logging
+
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Starting crypto stream for {symbol_list}...")
@@ -387,12 +469,17 @@ def crypto_stream(symbols):
         stream_client.subscribe_quotes(quote_handler, *symbol_list)
         stream_client.subscribe_trades(trade_handler, *symbol_list)
 
-        with Live(get_table(), refresh_per_second=4) as live:
+        # Suppress websocket logging during Live display to prevent interference
+        ws_logger = stdlib_logging.getLogger("alpaca.data.live.websocket")
+        ws_logger.setLevel(stdlib_logging.WARNING)
+
+        # Disable auto_refresh and use only manual update() calls to avoid double rendering
+        with Live(get_table(), auto_refresh=False) as live:
 
             async def update():
                 while True:
-                    live.update(get_table())
                     await asyncio.sleep(0.25)
+                    live.update(get_table(), refresh=True)
 
             task = asyncio.create_task(update())
             try:

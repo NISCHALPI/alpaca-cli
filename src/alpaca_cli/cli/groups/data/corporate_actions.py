@@ -11,13 +11,36 @@ logger = get_logger("data.corporate_actions")
 
 
 @click.command("corporate-actions")
-@click.option("--symbols", help="Comma-separated symbols")
 @click.option(
-    "--types", help="Comma-separated types (dividend, merger, spinoff, split)"
+    "--symbols",
+    type=str,
+    default=None,
+    help="[Optional] Comma-separated list of symbols to filter by",
 )
-@click.option("--start", help="Start date (YYYY-MM-DD)")
-@click.option("--end", help="End date (YYYY-MM-DD)")
-@click.option("--limit", default=50, help="Max results")
+@click.option(
+    "--types",
+    type=str,
+    default=None,
+    help="[Optional] Comma-separated action types. Choices: dividend, merger, spinoff, split",
+)
+@click.option(
+    "--start",
+    type=str,
+    default=None,
+    help="[Optional] Start date in YYYY-MM-DD format",
+)
+@click.option(
+    "--end",
+    type=str,
+    default=None,
+    help="[Optional] End date in YYYY-MM-DD format",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=50,
+    help="[Optional] Maximum number of results to return. Default: 50",
+)
 def corporate_actions(
     symbols: Optional[str],
     types: Optional[str],

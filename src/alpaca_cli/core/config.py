@@ -74,25 +74,6 @@ class Config:
 
     def validate(self) -> None:
         if not self.API_KEY or not self.API_SECRET:
-            error_msg = (
-                "\n[bold red]Error: API credentials not found.[/bold red]\n\n"
-                "You can load credentials via:\n"
-                "1. [yellow]Environment Variables[/yellow]:\n"
-                "   export APCA_API_KEY_ID='your_key'\n"
-                "   export APCA_API_SECRET_KEY='your_secret'\n\n"
-                "2. [yellow]Config File[/yellow] (~/.alpaca.json):\n"
-                "   {\n"
-                '       "key": "your_key",\n'
-                '       "secret": "your_secret",\n'
-                '       "paper_endpoint": "https://paper-api.alpaca.markets",\n'
-                '       "live_endpoint": "https://api.alpaca.markets"\n'
-                "   }"
-            )
-            # raising ValueError usually catches by click and prints "Error: <message>"
-            # To preserve rich formatting we print directly here if we expect it to be caught by our own logic?
-            # Or just return plain text. The user wants "good message".
-            # I'll stick to plain text for ValueError to avoid ANSI code issues in standard logs,
-            # but format it nicely.
             plain_error = (
                 "API credentials not found.\n\n"
                 "You can load credentials via:\n"

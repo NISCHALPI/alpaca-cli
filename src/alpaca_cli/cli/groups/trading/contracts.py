@@ -2,7 +2,7 @@
 
 import rich_click as click
 from typing import Optional, List, Any
-from datetime import datetime, date
+from datetime import datetime
 from alpaca_cli.core.client import get_trading_client
 from alpaca_cli.cli.utils import print_table, format_currency
 from alpaca_cli.logger.logger import get_logger
@@ -18,25 +18,67 @@ def contracts() -> None:
 
 @contracts.command("list")
 @click.argument("underlying_symbol")
-@click.option("--expiry", help="Exact expiration date (YYYY-MM-DD)")
-@click.option("--expiry-from", help="Expiration date range start (YYYY-MM-DD)")
-@click.option("--expiry-to", help="Expiration date range end (YYYY-MM-DD)")
+@click.option(
+    "--expiry",
+    type=str,
+    default=None,
+    help="[Optional] Exact expiration date in YYYY-MM-DD format",
+)
+@click.option(
+    "--expiry-from",
+    type=str,
+    default=None,
+    help="[Optional] Expiration date range start in YYYY-MM-DD format",
+)
+@click.option(
+    "--expiry-to",
+    type=str,
+    default=None,
+    help="[Optional] Expiration date range end in YYYY-MM-DD format",
+)
 @click.option(
     "--type",
     "option_type",
     type=click.Choice(["call", "put"], case_sensitive=False),
-    help="Option type",
+    default=None,
+    help="[Optional] Filter by option type. Choices: call, put",
 )
-@click.option("--strike-from", type=float, help="Strike price range start")
-@click.option("--strike-to", type=float, help="Strike price range end")
+@click.option(
+    "--strike-from",
+    type=float,
+    default=None,
+    help="[Optional] Minimum strike price filter",
+)
+@click.option(
+    "--strike-to",
+    type=float,
+    default=None,
+    help="[Optional] Maximum strike price filter",
+)
 @click.option(
     "--style",
     type=click.Choice(["american", "european"], case_sensitive=False),
-    help="Option style",
+    default=None,
+    help="[Optional] Filter by option style. Choices: american, european",
 )
-@click.option("--root-symbol", help="Root symbol filter")
-@click.option("--limit", default=50, help="Max contracts to return")
-@click.option("--page-token", help="Pagination token")
+@click.option(
+    "--root-symbol",
+    type=str,
+    default=None,
+    help="[Optional] Filter by root symbol",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=50,
+    help="[Optional] Maximum number of contracts to return. Default: 50",
+)
+@click.option(
+    "--page-token",
+    type=str,
+    default=None,
+    help="[Optional] Pagination token for next page of results",
+)
 def list_contracts(
     underlying_symbol: str,
     expiry: Optional[str],

@@ -11,10 +11,19 @@ from rich.console import Console
 from rich.table import Table
 
 from alpaca_cli.core.constants import (
-    PRECISION,
     MIN_TRADE_VALUE_THRESHOLD,
     MIN_QTY_THRESHOLD,
+    MAX_SPREAD_THRESHOLD,
 )
+from alpaca_cli.logger.logger import get_logger
+from alpaca.data.requests import (
+    StockLatestQuoteRequest,
+    CryptoLatestQuoteRequest,
+    StockLatestBarRequest,
+    CryptoLatestBarRequest,
+)
+
+logger = get_logger("cli.utils")
 
 console = Console()
 
@@ -118,6 +127,21 @@ def format_currency(value: Any) -> str:
         return f"${float(value):,.2f}"
     except (ValueError, TypeError):
         return str(value)
+
+
+def calculate_position_weights(market_values: List[float]) -> List[float]:
+    """Calculate weight percentages for positions.
+
+    Args:
+        market_values: List of market values for each position
+
+    Returns:
+        List of weight percentages (0-100) corresponding to each position
+    """
+    total = sum(market_values)
+    if total <= 0:
+        return [0.0] * len(market_values)
+    return [(val / total * 100) for val in market_values]
 
 
 def validate_not_nan(name: str, value: Any) -> None:
@@ -264,3 +288,128 @@ def calculate_rebalancing_orders(
         )
 
     return orders
+
+
+def get_stock_latest_price_with_fallback(
+    symbols: List[str],
+    client: Any,
+) -> Dict[str, float]:
+    """
+    Fetch latest STOCK prices with fallback.
+    """
+    prices = {}
+    if not symbols:
+        return prices
+
+    try:
+        # 1. Quotes
+        quotes = client.get_stock_latest_quote(
+            StockLatestQuoteRequest(symbol_or_symbols=symbols)
+        )
+
+        fallback_symbols = []
+        for sym in symbols:
+            if sym in quotes:
+                q = quotes[sym]
+                midpoint = (q.bid_price + q.ask_price) / 2
+                spread = abs(q.ask_price - q.bid_price)
+
+                # Avoid division by zero
+                if midpoint > 0:
+                    spread_pct = spread / midpoint
+                else:
+                    spread_pct = 1.0
+
+                if (
+                    spread_pct > MAX_SPREAD_THRESHOLD
+                    or q.bid_price <= 0
+                    or q.ask_price <= 0
+                ):
+                    logger.warning(
+                        f"Spread high or invalid quote for {sym} (Spread: {spread_pct:.2%}). Fallback to latest bar."
+                    )
+                    fallback_symbols.append(sym)
+                else:
+                    prices[sym] = midpoint
+            else:
+                fallback_symbols.append(sym)
+
+        # 2. Fallback Bars
+        if fallback_symbols:
+            logger.info(f"Fetching latest stock bars for fallback: {fallback_symbols}")
+            bars = client.get_stock_latest_bar(
+                StockLatestBarRequest(symbol_or_symbols=fallback_symbols)
+            )
+            for sym in fallback_symbols:
+                if sym in bars:
+                    prices[sym] = bars[sym].close
+                else:
+                    logger.warning(f"No data for {sym}")
+
+    except Exception as e:
+        logger.error(f"Failed to fetch stock prices: {e}")
+        return prices
+
+    return prices
+
+
+def get_crypto_latest_price_with_fallback(
+    symbols: List[str],
+    client: Any,
+) -> Dict[str, float]:
+    """
+    Fetch latest CRYPTO prices with fallback.
+    """
+    prices = {}
+    if not symbols:
+        return prices
+
+    try:
+        # 1. Quotes
+        quotes = client.get_crypto_latest_quote(
+            CryptoLatestQuoteRequest(symbol_or_symbols=symbols)
+        )
+
+        fallback_symbols = []
+        for sym in symbols:
+            if sym in quotes:
+                q = quotes[sym]
+                midpoint = (q.bid_price + q.ask_price) / 2
+                spread = abs(q.ask_price - q.bid_price)
+
+                if midpoint > 0:
+                    spread_pct = spread / midpoint
+                else:
+                    spread_pct = 1.0
+
+                if (
+                    spread_pct > MAX_SPREAD_THRESHOLD
+                    or q.bid_price <= 0
+                    or q.ask_price <= 0
+                ):
+                    logger.warning(
+                        f"Spread high or invalid quote for {sym} (Spread: {spread_pct:.2%}). Fallback to latest bar."
+                    )
+                    fallback_symbols.append(sym)
+                else:
+                    prices[sym] = midpoint
+            else:
+                fallback_symbols.append(sym)
+
+        # 2. Fallback Bars
+        if fallback_symbols:
+            logger.info(f"Fetching latest crypto bars for fallback: {fallback_symbols}")
+            bars = client.get_crypto_latest_bar(
+                CryptoLatestBarRequest(symbol_or_symbols=fallback_symbols)
+            )
+            for sym in fallback_symbols:
+                if sym in bars:
+                    prices[sym] = bars[sym].close
+                else:
+                    logger.warning(f"No data for {sym}")
+
+    except Exception as e:
+        logger.error(f"Failed to fetch crypto prices: {e}")
+        return prices
+
+    return prices

@@ -22,3 +22,6 @@ MAX_POSITIONS_DISPLAY = 8
 
 # Market indices for dashboard
 MARKET_INDICES = ["SPY", "QQQ", "DIA", "IWM"]
+
+# Price Fallback Logic
+MAX_SPREAD_THRESHOLD = 0.01  # 1% fallback threshold for bid-ask spread

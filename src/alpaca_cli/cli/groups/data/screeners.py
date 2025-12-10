@@ -19,8 +19,14 @@ def screeners() -> None:
     "--market",
     type=click.Choice(["stocks", "crypto"], case_sensitive=False),
     default="stocks",
+    help="[Optional] Market type. Choices: stocks, crypto. Default: stocks",
 )
-@click.option("--top", default=10, help="Number of movers to show")
+@click.option(
+    "--top",
+    type=int,
+    default=10,
+    help="[Optional] Number of top movers to display. Default: 10",
+)
 def movers(market: str, top: int) -> None:
     """Get top market movers (gainers/losers)."""
     from alpaca.data.historical.screener import ScreenerClient
@@ -73,8 +79,14 @@ def movers(market: str, top: int) -> None:
     "--by",
     type=click.Choice(["volume", "trades"], case_sensitive=False),
     default="volume",
+    help="[Optional] Sort most active by. Choices: volume, trades. Default: volume",
 )
-@click.option("--top", default=10, help="Number of stocks to show")
+@click.option(
+    "--top",
+    type=int,
+    default=10,
+    help="[Optional] Number of stocks to display. Default: 10",
+)
 def actives(by: str, top: int) -> None:
     """Get most active stocks."""
     from alpaca.data.historical.screener import ScreenerClient
