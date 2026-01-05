@@ -515,12 +515,11 @@ def stock_stream(symbols: str, feed: str) -> None:
     data = {s: {"bid": "-", "ask": "-", "trade": "-", "time": "-"} for s in symbol_list}
 
     def get_table():
-        table = Table(title="Live Stock Data", box=box.ROUNDED)
-        table.add_column("Symbol", style="cyan")
-        table.add_column("Bid", style="green")
-        table.add_column("Ask", style="red")
-        table.add_column("Last Trade", style="yellow")
-        table.add_column("Time", style="dim")
+        from alpaca_cli.cli.theme import create_stream_table
+
+        table = create_stream_table(
+            "Live Stock Data", ["Symbol", "Bid", "Ask", "Last Trade", "Time"]
+        )
         for sym in symbol_list:
             d = data[sym]
             table.add_row(sym, d["bid"], d["ask"], d["trade"], d["time"])

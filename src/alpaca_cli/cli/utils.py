@@ -99,7 +99,7 @@ def print_table(
     rows: List[List[Any]],
     show_mode: bool = True,
 ) -> None:
-    """Print a rich table.
+    """Print a rich table with consistent theming.
 
     Args:
         title: Table title
@@ -107,18 +107,14 @@ def print_table(
         rows: List of rows, where each row is a list of values
         show_mode: Whether to show Paper/Live mode indicator (default: True)
     """
-    # Add mode indicator to title if requested
-    full_title = f"{get_mode_indicator()} {title}" if show_mode else title
+    from alpaca_cli.cli.theme import create_table, console as theme_console
 
-    table = Table(title=full_title, show_header=True, header_style="bold magenta")
-
-    for col in columns:
-        table.add_column(col)
+    table = create_table(title, columns, show_mode=show_mode)
 
     for row in rows:
         table.add_row(*[str(r) for r in row])
 
-    console.print(table)
+    theme_console.print(table)
 
 
 def format_currency(value: Any) -> str:

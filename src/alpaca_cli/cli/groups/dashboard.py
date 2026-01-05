@@ -1,6 +1,6 @@
 import rich_click as click
 from datetime import datetime
-from rich.console import Console, Group
+from rich.console import Group
 from rich.layout import Layout
 from rich.panel import Panel
 from rich.table import Table
@@ -12,11 +12,17 @@ from alpaca_cli.core.client import get_trading_client, get_stock_data_client
 from alpaca_cli.core.config import config
 from alpaca_cli.logger.logger import get_logger
 from alpaca_cli.cli.utils import format_currency
+from alpaca_cli.cli.theme import (
+    colors,
+    icons,
+    console,
+    get_pl_color,
+    get_pl_icon,
+)
 from alpaca.data.historical.news import NewsClient
 from alpaca.data.requests import NewsRequest, StockSnapshotRequest
 
 logger = get_logger("dashboard")
-console = Console()
 
 
 # Sparkline characters (block elements for mini charts)
@@ -48,34 +54,7 @@ def get_sparkline(values: list[float], width: int = 8) -> str:
     return "".join(result)
 
 
-def get_pl_color(pct: float) -> str:
-    """Get gradient color based on P/L percentage."""
-    if pct >= 5:
-        return "bold green"
-    elif pct >= 2:
-        return "green"
-    elif pct >= 0:
-        return "bright_green"
-    elif pct >= -2:
-        return "bright_red"
-    elif pct >= -5:
-        return "red"
-    else:
-        return "bold red"
-
-
-def get_pl_icon(pct: float) -> str:
-    """Get icon based on P/L."""
-    if pct >= 2:
-        return "🚀"
-    elif pct >= 0.5:
-        return "📈"
-    elif pct >= 0:
-        return "➡️"
-    elif pct >= -2:
-        return "📉"
-    else:
-        return "🔻"
+# get_pl_color and get_pl_icon are imported from theme module
 
 
 def make_layout() -> Layout:
@@ -103,37 +82,45 @@ def make_layout() -> Layout:
 
 
 def get_header_panel():
-    """Create a styled header banner."""
+    """Create a modern styled header banner."""
     now = datetime.now().astimezone()
 
     # Mode indicator
     mode = "PAPER" if config.IS_PAPER else "LIVE"
-    mode_color = "yellow" if config.IS_PAPER else "red"
-    mode_style = f"bold {mode_color}"
+    mode_color = colors.PAPER_MODE if config.IS_PAPER else colors.LIVE_MODE
+    mode_icon = "◉" if config.IS_PAPER else "●"
 
-    # Build header text
+    # Build modern header text
     title = Text()
-    title.append(
-        "╔══════════════════════════════════════════════════════════════════════════╗\n",
-        style="cyan",
-    )
-    title.append("║  ", style="cyan")
-    title.append("ALPACA CLI", style="bold white")
-    title.append("  │  ", style="dim")
-    title.append("Trading Dashboard", style="bold cyan")
-    title.append("  │  ", style="dim")
-    title.append(f"[{mode}]", style=mode_style)
-    title.append("  │  ", style="dim")
-    title.append(now.strftime("%Y-%m-%d %H:%M:%S %Z"), style="dim white")
 
-    # Pad to fill width
-    padding = " " * 10
-    title.append(padding, style="cyan")
-    title.append("║\n", style="cyan")
-    title.append(
-        "╚══════════════════════════════════════════════════════════════════════════╝",
-        style="cyan",
-    )
+    # Top border with gradient effect
+    title.append("┌", style=colors.BORDER)
+    title.append("─" * 76, style=colors.BORDER)
+    title.append("┐\n", style=colors.BORDER)
+
+    # Main content line
+    title.append("│  ", style=colors.BORDER)
+    title.append("◆ ", style=colors.PRIMARY)
+    title.append("ALPACA", style=f"bold {colors.PRIMARY}")
+    title.append(" CLI", style="bold white")
+    title.append("  ⋮  ", style=colors.MUTED)
+    title.append("Trading Dashboard", style=f"{colors.SECONDARY}")
+    title.append("  ⋮  ", style=colors.MUTED)
+    title.append(f"{mode_icon} ", style=mode_color)
+    title.append(mode, style=mode_color)
+    title.append("  ⋮  ", style=colors.MUTED)
+    title.append("🕐 ", style=colors.MUTED)
+    title.append(now.strftime("%H:%M:%S"), style=colors.TIMESTAMP)
+    title.append("  ", style="")
+
+    # Padding to fill width
+    title.append(" " * 14, style="")
+    title.append("│\n", style=colors.BORDER)
+
+    # Bottom border
+    title.append("└", style=colors.BORDER)
+    title.append("─" * 76, style=colors.BORDER)
+    title.append("┘", style=colors.BORDER)
 
     return Panel(
         Align.center(title),
@@ -148,8 +135,8 @@ def get_market_status_panel():
     clock = client.get_clock()
 
     status_text = "OPEN" if clock.is_open else "CLOSED"
-    status_color = "green" if clock.is_open else "red"
-    status_icon = "🟢" if clock.is_open else "🔴"
+    status_color = colors.SUCCESS if clock.is_open else colors.ERROR
+    status_icon = icons.OPEN if clock.is_open else icons.CLOSED
 
     next_session = clock.next_open if not clock.is_open else clock.next_close
     next_label = "Opens" if not clock.is_open else "Closes"
@@ -164,14 +151,16 @@ def get_market_status_panel():
     text = Text()
     text.append(f"{status_icon} Market ", style="bold white")
     text.append(status_text, style=f"bold {status_color}")
-    text.append(f"  │  {next_label}: ", style="dim white")
-    text.append(f"{next_session_local.strftime('%H:%M')}", style="cyan")
-    text.append(f" ({hours:02d}:{minutes:02d}:{seconds:02d})", style="dim cyan")
+    text.append(f"  │  {next_label}: ", style=colors.MUTED)
+    text.append(f"{next_session_local.strftime('%H:%M')}", style=colors.PRIMARY)
+    text.append(
+        f" ({hours:02d}:{minutes:02d}:{seconds:02d})", style=f"dim {colors.PRIMARY}"
+    )
 
     return Panel(
         Align.center(text),
-        title="[bold blue]⏰ Market Status[/bold blue]",
-        border_style="blue",
+        title=f"[bold {colors.PANEL_MARKET}]{icons.CLOCK} Market Status[/bold {colors.PANEL_MARKET}]",
+        border_style=colors.PANEL_MARKET,
         box=box.ROUNDED,
     )
 
@@ -197,12 +186,12 @@ def get_indices_panel():
     table = Table(
         box=box.SIMPLE,
         show_header=True,
-        header_style="bold yellow",
+        header_style=colors.HEADER,
         padding=(0, 1),
         expand=True,
     )
-    table.add_column("Index", style="bold white")
-    table.add_column("Price", justify="right")
+    table.add_column("Index", style=colors.SYMBOL)
+    table.add_column("Price", justify="right", style=colors.PRICE)
     table.add_column("Change", justify="right")
     table.add_column("Trend", justify="center")
 
@@ -253,8 +242,8 @@ def get_indices_panel():
 
     return Panel(
         table,
-        title="[bold yellow]📊 Market Indices[/bold yellow]",
-        border_style="yellow",
+        title=f"[bold {colors.ACCENT}]{icons.CHART} Market Indices[/bold {colors.ACCENT}]",
+        border_style=colors.ACCENT,
         box=box.ROUNDED,
     )
 
@@ -315,8 +304,8 @@ def get_account_panel():
 
     return Panel(
         rendered,
-        title="[bold green]💼 Account Overview[/bold green]",
-        border_style="green",
+        title=f"[bold {colors.PANEL_ACCOUNT}]{icons.ACCOUNT} Account Overview[/bold {colors.PANEL_ACCOUNT}]",
+        border_style=colors.PANEL_ACCOUNT,
         box=box.ROUNDED,
     )
 
@@ -328,26 +317,26 @@ def get_positions_panel():
 
     table = Table(
         show_header=True,
-        header_style="bold magenta",
+        header_style=colors.HEADER,
         box=box.SIMPLE_HEAD,
         expand=True,
         padding=(0, 1),
     )
-    table.add_column("Symbol", style="bold white")
-    table.add_column("Qty", justify="right")
-    table.add_column("Avg Cost", justify="right", style="dim")
-    table.add_column("Current", justify="right")
-    table.add_column("Value", justify="right")
+    table.add_column("Symbol", style=colors.SYMBOL)
+    table.add_column("Qty", justify="right", style=colors.QUANTITY)
+    table.add_column("Avg Cost", justify="right", style=colors.MUTED)
+    table.add_column("Current", justify="right", style=colors.PRICE)
+    table.add_column("Value", justify="right", style=colors.PRICE)
     table.add_column("P/L", justify="right")
 
     if not positions:
         return Panel(
             Align.center(
-                Text("📭 No open positions", style="dim italic"),
+                Text(f"{icons.POSITION} No open positions", style=colors.MUTED),
                 vertical="middle",
             ),
-            title="[bold magenta]📊 Positions[/bold magenta]",
-            border_style="magenta",
+            title=f"[bold {colors.PANEL_POSITIONS}]{icons.POSITION} Positions[/bold {colors.PANEL_POSITIONS}]",
+            border_style=colors.PANEL_POSITIONS,
             box=box.ROUNDED,
         )
 
@@ -376,8 +365,8 @@ def get_positions_panel():
 
     return Panel(
         table,
-        title=f"[bold magenta]📊 Positions ({len(positions)})[/bold magenta]",
-        border_style="magenta",
+        title=f"[bold {colors.PANEL_POSITIONS}]{icons.POSITION} Positions ({len(positions)})[/bold {colors.PANEL_POSITIONS}]",
+        border_style=colors.PANEL_POSITIONS,
         box=box.ROUNDED,
     )
 
@@ -393,26 +382,26 @@ def get_orders_panel():
 
     table = Table(
         show_header=True,
-        header_style="bold cyan",
+        header_style=colors.HEADER,
         box=box.SIMPLE_HEAD,
         expand=True,
         padding=(0, 1),
     )
-    table.add_column("Symbol")
+    table.add_column("Symbol", style=colors.SYMBOL)
     table.add_column("Side")
-    table.add_column("Type")
-    table.add_column("Qty", justify="right")
-    table.add_column("Price", justify="right")
+    table.add_column("Type", style=colors.MUTED)
+    table.add_column("Qty", justify="right", style=colors.QUANTITY)
+    table.add_column("Price", justify="right", style=colors.PRICE)
     table.add_column("Status")
 
     if not orders:
         return Panel(
             Align.center(
-                Text("📭 No open orders", style="dim italic"),
+                Text(f"{icons.ORDER} No open orders", style=colors.MUTED),
                 vertical="middle",
             ),
-            title="[bold cyan]📋 Open Orders[/bold cyan]",
-            border_style="cyan",
+            title=f"[bold {colors.PANEL_ORDERS}]{icons.ORDER} Open Orders[/bold {colors.PANEL_ORDERS}]",
+            border_style=colors.PANEL_ORDERS,
             box=box.ROUNDED,
         )
 
@@ -447,8 +436,8 @@ def get_orders_panel():
 
     return Panel(
         table,
-        title=f"[bold cyan]📋 Open Orders ({len(orders)})[/bold cyan]",
-        border_style="cyan",
+        title=f"[bold {colors.PANEL_ORDERS}]{icons.ORDER} Open Orders ({len(orders)})[/bold {colors.PANEL_ORDERS}]",
+        border_style=colors.PANEL_ORDERS,
         box=box.ROUNDED,
     )
 
@@ -463,7 +452,7 @@ def get_news_panel():
         news_items = client.get_news(req)["news"]
 
         table = Table(show_header=False, box=None, expand=True, padding=(0, 1))
-        table.add_column("Time", style="dim cyan", min_width=6)
+        table.add_column("Time", style=colors.TIMESTAMP, min_width=6)
         table.add_column("Headline", overflow="fold")
 
         for n in news_items:
@@ -486,21 +475,23 @@ def get_news_panel():
             # Add source if available
             source = getattr(n, "source", None)
             if source:
-                headline_display = f"{headline_display} [dim]({source})[/dim]"
+                headline_display = (
+                    f"{headline_display} [{colors.MUTED}]({source})[/{colors.MUTED}]"
+                )
 
-            table.add_row(f"🕐 {time_str}", headline_display)
+            table.add_row(f"{icons.CLOCK} {time_str}", headline_display)
 
         return Panel(
             table,
-            title="[bold yellow]📰 Latest News (click to open)[/bold yellow]",
-            border_style="yellow",
+            title=f"[bold {colors.PANEL_NEWS}]{icons.NEWS} Latest News (click to open)[/bold {colors.PANEL_NEWS}]",
+            border_style=colors.PANEL_NEWS,
             box=box.ROUNDED,
         )
     except Exception as e:
         return Panel(
-            f"[red]Failed to load news: {e}[/red]",
-            title="[bold yellow]📰 Latest News[/bold yellow]",
-            border_style="yellow",
+            f"[{colors.ERROR}]Failed to load news: {e}[/{colors.ERROR}]",
+            title=f"[bold {colors.PANEL_NEWS}]{icons.NEWS} Latest News[/bold {colors.PANEL_NEWS}]",
+            border_style=colors.PANEL_NEWS,
             box=box.ROUNDED,
         )
 
