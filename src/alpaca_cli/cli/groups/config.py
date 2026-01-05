@@ -1,5 +1,5 @@
 import rich_click as click
-from alpaca_cli.core.config import config
+from alpaca_cli.core.config import config, CREDENTIALS_FILE, STATE_FILE
 from alpaca_cli.core.client import get_trading_client
 from alpaca_cli.logger.logger import get_logger
 
@@ -19,9 +19,8 @@ def verify() -> None:
 
     # Check loading source
     logger.info(f"Source: {config.SOURCE}")
-
+    logger.info(f"Mode: {config.mode.upper()}")
     logger.info(f"Base URL: {config.BASE_URL}")
-    logger.info(f"Mode: {'Paper' if config.IS_PAPER else 'Live'}")
 
     try:
         config.validate()
@@ -44,19 +43,32 @@ def verify() -> None:
 @configuration.command()
 def show() -> None:
     """Show current configuration."""
+    logger.info(f"Current Mode: {config.mode.upper()}")
     logger.info(f"Source: {config.SOURCE}")
     logger.info(f"API Key: {'*' * 8 if config.API_KEY else 'Not Set'}")
     logger.info(f"API Secret: {'*' * 8 if config.API_SECRET else 'Not Set'}")
-    logger.info(f"Base URL: {config.BASE_URL}")
-    logger.info(f"Paper Trading: {config.IS_PAPER}")
+    logger.info(f"Endpoint: {config.BASE_URL}")
+    logger.info("")
+
+    # Show credentials status for both modes
+    logger.info("Configured Modes:")
+    for mode in ("paper", "live"):
+        status = (
+            "✓ Configured" if config.has_mode_credentials(mode) else "✗ Not configured"
+        )
+        logger.info(f"  {mode.upper()}: {status}")
+
+    logger.info("")
+    logger.info(f"Credentials File: {CREDENTIALS_FILE}")
+    logger.info(f"State File: {STATE_FILE}")
 
 
 @configuration.command()
 @click.argument("mode", type=click.Choice(["paper", "live"], case_sensitive=False))
 def set_mode(mode: str) -> None:
-    """Set trading mode (Paper or Live)."""
-    url = config.PAPER_URL if mode.lower() == "paper" else config.LIVE_URL
-
-    config.save("APCA_API_BASE_URL", url)
-    logger.info(f"Configuration updated. Switched to {mode.upper()} mode.")
-    logger.info(f"Base URL set to: {url}")
+    """Set trading mode (paper or live)."""
+    try:
+        config.set_mode(mode.lower())  # type: ignore
+        logger.info(f"Switched to {mode.upper()} mode.")
+    except ValueError as e:
+        logger.error(str(e))

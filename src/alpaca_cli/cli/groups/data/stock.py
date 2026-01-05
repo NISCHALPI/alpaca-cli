@@ -4,7 +4,6 @@ import rich_click as click
 import asyncio
 from typing import Optional
 from datetime import datetime, timedelta, timezone
-from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.live import StockDataStream
 from alpaca.data.requests import (
     StockBarsRequest,
@@ -19,6 +18,7 @@ from alpaca.data.timeframe import TimeFrame
 from alpaca.data.enums import DataFeed, Adjustment
 from alpaca.common.enums import Sort
 from alpaca_cli.core.config import config
+from alpaca_cli.core.client import get_stock_data_client
 from alpaca_cli.cli.utils import print_table, format_currency
 from alpaca_cli.logger.logger import get_logger
 from rich.live import Live
@@ -126,7 +126,7 @@ def stock_bars(
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching {timeframe} bars for {symbol_list}...")
 
-    client = StockHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_stock_data_client()
 
     end_dt = (
         datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -226,7 +226,7 @@ def stock_quotes(
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching quotes for {symbol_list}...")
 
-    client = StockHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_stock_data_client()
 
     start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_dt = (
@@ -317,7 +317,7 @@ def stock_trades(
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching trades for {symbol_list}...")
 
-    client = StockHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_stock_data_client()
 
     start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_dt = (
@@ -379,7 +379,7 @@ def stock_latest(symbols: str, feed: str, currency: Optional[str]) -> None:
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching latest data for {symbol_list}...")
 
-    client = StockHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_stock_data_client()
     feed_enum = get_stock_feed(feed)
 
     try:
@@ -441,7 +441,7 @@ def stock_snapshot(symbols: str, feed: str, currency: Optional[str]) -> None:
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching snapshots for {symbol_list}...")
 
-    client = StockHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_stock_data_client()
 
     try:
         req = StockSnapshotRequest(

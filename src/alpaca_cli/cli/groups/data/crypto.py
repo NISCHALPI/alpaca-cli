@@ -4,7 +4,6 @@ import rich_click as click
 import asyncio
 from typing import Optional
 from datetime import datetime, timedelta, timezone
-from alpaca.data.historical import CryptoHistoricalDataClient
 from alpaca.data.live import CryptoDataStream
 from alpaca.data.requests import (
     CryptoBarsRequest,
@@ -20,6 +19,7 @@ from alpaca.data.timeframe import TimeFrame
 from alpaca.data.enums import CryptoFeed
 from alpaca.common.enums import Sort
 from alpaca_cli.core.config import config
+from alpaca_cli.core.client import get_crypto_data_client
 from alpaca_cli.cli.utils import print_table, format_currency
 from alpaca_cli.logger.logger import get_logger
 from rich.live import Live
@@ -91,7 +91,7 @@ def crypto_bars(
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching {timeframe} crypto bars for {symbol_list}...")
 
-    client = CryptoHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_crypto_data_client()
 
     end_dt = (
         datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -181,7 +181,7 @@ def crypto_quotes(
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching crypto quotes for {symbol_list}...")
 
-    client = CryptoHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_crypto_data_client()
 
     start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_dt = (
@@ -260,7 +260,7 @@ def crypto_trades(
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching crypto trades for {symbol_list}...")
 
-    client = CryptoHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_crypto_data_client()
 
     start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_dt = (
@@ -306,7 +306,7 @@ def crypto_latest(symbols: str) -> None:
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching latest crypto data for {symbol_list}...")
 
-    client = CryptoHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_crypto_data_client()
 
     try:
         quotes = client.get_crypto_latest_quote(
@@ -351,7 +351,7 @@ def crypto_snapshot(symbols: str) -> None:
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching crypto snapshots for {symbol_list}...")
 
-    client = CryptoHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_crypto_data_client()
 
     try:
         snapshots = client.get_crypto_snapshot(
@@ -407,7 +407,7 @@ def crypto_orderbook(symbols: str) -> None:
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
     logger.info(f"Fetching orderbook for {symbol_list}...")
 
-    client = CryptoHistoricalDataClient(config.API_KEY, config.API_SECRET)
+    client = get_crypto_data_client()
 
     try:
         result = client.get_crypto_latest_orderbook(

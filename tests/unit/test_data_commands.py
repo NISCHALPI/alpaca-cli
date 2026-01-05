@@ -13,9 +13,9 @@ def runner():
 def test_stock_latest(runner):
     """Test 'data stock latest' command."""
     with patch(
-        "alpaca_cli.cli.groups.data.stock.StockHistoricalDataClient"
-    ) as MockClient:
-        mock_instance = MockClient.return_value
+        "alpaca_cli.cli.groups.data.stock.get_stock_data_client"
+    ) as mock_get_client:
+        mock_instance = mock_get_client.return_value
 
         # Mock response objects
         mock_quote = MagicMock()
@@ -50,9 +50,9 @@ def test_stock_latest(runner):
 def test_crypto_bars(runner):
     """Test 'data crypto bars' command."""
     with patch(
-        "alpaca_cli.cli.groups.data.crypto.CryptoHistoricalDataClient"
-    ) as MockClient:
-        mock_instance = MockClient.return_value
+        "alpaca_cli.cli.groups.data.crypto.get_crypto_data_client"
+    ) as mock_get_client:
+        mock_instance = mock_get_client.return_value
 
         # Mock bar object
         mock_bar = MagicMock()

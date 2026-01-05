@@ -4,6 +4,28 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 
+@pytest.fixture(autouse=True)
+def mock_config():
+    """Mock config with test credentials for all tests."""
+    from alpaca_cli.core import config as config_module
+
+    # Patch the singleton's attributes directly
+    original_api_key = config_module.config.API_KEY
+    original_api_secret = config_module.config.API_SECRET
+    original_validate = config_module.config.validate
+
+    config_module.config.API_KEY = "test_api_key"
+    config_module.config.API_SECRET = "test_api_secret"
+    config_module.config.validate = MagicMock()  # Don't raise on validation
+
+    yield config_module.config
+
+    # Restore original values
+    config_module.config.API_KEY = original_api_key
+    config_module.config.API_SECRET = original_api_secret
+    config_module.config.validate = original_validate
+
+
 @pytest.fixture
 def mock_trading_client():
     """Mock TradingClient for tests."""

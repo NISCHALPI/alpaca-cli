@@ -120,7 +120,7 @@ def get_position(symbol_or_asset_id: str) -> None:
     "--percentage",
     type=float,
     default=None,
-    help="[Optional] Partial close: percentage of position to close (0-100)",
+    help="[Optional] Partial close: percentage of position to close (e.g., 50 for 50%)",
 )
 @click.option(
     "--cancel-orders",

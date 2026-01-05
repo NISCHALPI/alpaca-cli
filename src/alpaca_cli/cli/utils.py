@@ -133,15 +133,18 @@ def calculate_position_weights(market_values: List[float]) -> List[float]:
     """Calculate weight percentages for positions.
 
     Args:
-        market_values: List of market values for each position
+        market_values: List of market values for each position (can be negative for shorts)
 
     Returns:
-        List of weight percentages (0-100) corresponding to each position
+        List of weight percentages (0-100) corresponding to each position.
+        Uses absolute values to handle short positions correctly.
     """
-    total = sum(market_values)
+    # Use absolute values to correctly handle short positions
+    abs_values = [abs(val) for val in market_values]
+    total = sum(abs_values)
     if total <= 0:
         return [0.0] * len(market_values)
-    return [(val / total * 100) for val in market_values]
+    return [(abs(val) / total * 100) for val in market_values]
 
 
 def validate_not_nan(name: str, value: Any) -> None:

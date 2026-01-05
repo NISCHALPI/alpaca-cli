@@ -23,6 +23,11 @@ class AlpacaClient:
             )
         return cls._instance
 
+    @classmethod
+    def reset(cls) -> None:
+        """Clear cached client instance. Call when mode/credentials change."""
+        cls._instance = None
+
 
 class AlpacaDataClient:
     """Singleton manager for data clients (Stock and Crypto)."""
@@ -55,6 +60,18 @@ class AlpacaDataClient:
                 secret_key=config.API_SECRET,
             )
         return cls._crypto_instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """Clear cached data client instances. Call when mode/credentials change."""
+        cls._stock_instance = None
+        cls._crypto_instance = None
+
+
+def reset_all_clients() -> None:
+    """Reset all cached client instances. Call when switching modes."""
+    AlpacaClient.reset()
+    AlpacaDataClient.reset()
 
 
 def get_trading_client() -> TradingClient:
