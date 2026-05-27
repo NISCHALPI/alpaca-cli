@@ -287,3 +287,91 @@ def history(
         )
 
     print_table("Portfolio History", ["Time", "Equity", "P/L ($)", "P/L (%)"], rows)
+
+
+@account.command("performance-summary")
+def performance_summary() -> None:
+    """Get a summary of daily/weekly PnL, top winners, and top losers."""
+    logger.info("Fetching performance summary...")
+    client = get_trading_client()
+
+    try:
+        acct = client.get_account()
+        positions = client.get_all_positions()
+    except Exception as e:
+        logger.error(f"Failed to fetch account or positions: {e}")
+        return
+
+    # 1. PnL & Utilization
+    current_equity = float(acct.equity)
+    last_equity = float(acct.last_equity)
+    daily_pnl = current_equity - last_equity
+    daily_pnl_pct = (daily_pnl / last_equity * 100) if last_equity else 0.0
+
+    daily_color = "green" if daily_pnl >= 0 else "red"
+
+    # Fetch weekly history for weekly PnL
+    weekly_pnl = 0.0
+    weekly_pnl_pct = 0.0
+    try:
+        req = GetPortfolioHistoryRequest(period="1W", timeframe="1D")
+        hist = client.get_portfolio_history(req)
+        if hist.equity and len(hist.equity) > 0:
+            first_equity = hist.equity[0]
+            if first_equity:
+                weekly_pnl = current_equity - first_equity
+                weekly_pnl_pct = (weekly_pnl / first_equity) * 100
+    except Exception as e:
+        logger.debug(f"Could not fetch weekly history: {e}")
+
+    weekly_color = "green" if weekly_pnl >= 0 else "red"
+
+    utilization_rows = [
+        ["Total Equity", format_currency(current_equity)],
+        ["Cash", format_currency(acct.cash)],
+        ["Buying Power", format_currency(acct.buying_power)],
+        [
+            "Daily P/L",
+            f"[{daily_color}]{format_currency(daily_pnl)} ({daily_pnl_pct:.2f}%)[/{daily_color}]",
+        ],
+        [
+            "Weekly P/L",
+            f"[{weekly_color}]{format_currency(weekly_pnl)} ({weekly_pnl_pct:.2f}%)[/{weekly_color}]",
+        ],
+    ]
+
+    print_table("Account Overview", ["Metric", "Value"], utilization_rows)
+
+    # 2. Top Winners & Losers
+    if not positions:
+        logger.info("No open positions to evaluate.")
+        return
+
+    # Sort positions by unrealized_pl
+    sorted_pos = sorted(positions, key=lambda p: float(p.unrealized_pl), reverse=True)
+
+    winners = sorted_pos[:3] if len(sorted_pos) >= 3 else sorted_pos
+    # Only pick losers if their PnL is actually < 0
+    losers_all = [p for p in sorted_pos if float(p.unrealized_pl) < 0]
+    losers = sorted(losers_all, key=lambda p: float(p.unrealized_pl))[:3]
+
+    winners_rows = []
+    for p in winners:
+        pl = float(p.unrealized_pl)
+        pl_pct = float(p.unrealized_plpc) * 100
+        winners_rows.append(
+            [p.symbol, f"[green]{format_currency(pl)} ({pl_pct:.2f}%)[/green]"]
+        )
+
+    losers_rows = []
+    for p in losers:
+        pl = float(p.unrealized_pl)
+        pl_pct = float(p.unrealized_plpc) * 100
+        losers_rows.append(
+            [p.symbol, f"[red]{format_currency(pl)} ({pl_pct:.2f}%)[/red]"]
+        )
+
+    if winners_rows:
+        print_table("Top Winners (Unrealized)", ["Symbol", "P/L"], winners_rows)
+    if losers_rows:
+        print_table("Top Losers (Unrealized)", ["Symbol", "P/L"], losers_rows)

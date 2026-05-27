@@ -6,7 +6,6 @@ from typing import Generator
 from contextlib import contextmanager
 from rich.logging import RichHandler
 
-
 # Define a logging format
 
 

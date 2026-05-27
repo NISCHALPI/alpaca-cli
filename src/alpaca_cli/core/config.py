@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 from typing import Optional, Dict, Any, Literal
 
-
 # Credentials file - contains paper/live API credentials
 CREDENTIALS_FILE = Path.home() / ".alpaca.json"
 

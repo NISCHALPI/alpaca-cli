@@ -14,7 +14,13 @@ from alpaca.trading.requests import (
     StopLossRequest,
     ReplaceOrderRequest,
 )
-from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus, OrderStatus
+from alpaca.trading.enums import (
+    OrderSide,
+    TimeInForce,
+    QueryOrderStatus,
+    OrderStatus,
+    OrderClass,
+)
 from alpaca.common.enums import Sort
 from alpaca_cli.core.client import get_trading_client
 from alpaca_cli.cli.utils import print_table, format_currency, output_data
@@ -27,7 +33,6 @@ from alpaca_cli.cli.utils import (
     get_stock_latest_price_with_fallback,
     get_crypto_latest_price_with_fallback,
 )
-
 
 logger = get_logger("trading.orders")
 
@@ -1056,7 +1061,13 @@ def sell_trailing(
 
 
 # --- REBALANCE ---
-@orders.command("rebalance")
+@orders.group("portfolio")
+def portfolio() -> None:
+    """Manage portfolio-level bulk orders."""
+    pass
+
+
+@portfolio.command("rebalance")
 @click.argument("target_weights_path", type=click.Path(exists=True))
 @click.option(
     "--allow-short",
@@ -1375,7 +1386,7 @@ def _wait_for_order_completion(
     return False
 
 
-@orders.command("rebalance-notional")
+@portfolio.command("rebalance-notional")
 @click.argument("target_weights_path", type=click.Path(exists=True))
 @click.option(
     "--dry-run/--execute",
@@ -1716,7 +1727,7 @@ def rebalance_notional(
     logger.info("Rebalancing complete.")
 
 
-@orders.command("sell-portfolio-notional")
+@portfolio.command("sell-notional")
 @click.argument("amount", type=float)
 @click.option(
     "--dry-run/--execute",
@@ -1776,7 +1787,9 @@ def sell_portfolio_notional(
         logger.warning(
             f"Requested sell amount (${amount:.2f}) exceeds total market value of positions (${total_market_value:.2f})."
         )
-        if not yes and not click.confirm("Do you still want to proceed by selling the entire portfolio?"):
+        if not yes and not click.confirm(
+            "Do you still want to proceed by selling the entire portfolio?"
+        ):
             logger.info("Cancelled.")
             return
         amount = total_market_value
@@ -1786,13 +1799,17 @@ def sell_portfolio_notional(
         weight = market_value / total_market_value
         sell_notional = amount * weight
         if sell_notional >= 1.0:  # Alpaca minimum notional order is usually $1
-            orders_to_place.append({
-                "symbol": symbol,
-                "notional": sell_notional,
-            })
+            orders_to_place.append(
+                {
+                    "symbol": symbol,
+                    "notional": sell_notional,
+                }
+            )
 
     if not orders_to_place:
-        logger.info("Calculated sell amounts are too small to place orders (minimum $1 per position).")
+        logger.info(
+            "Calculated sell amounts are too small to place orders (minimum $1 per position)."
+        )
         return
 
     # Dry run display
@@ -1827,3 +1844,506 @@ def sell_portfolio_notional(
             logger.error(f"Failed to submit sell order for {o['symbol']}: {e}")
 
     logger.info("Sell portfolio notional complete.")
+
+
+@portfolio.command("buy-notional")
+@click.argument("amount", type=float)
+@click.option(
+    "--dry-run/--execute",
+    default=True,
+    help="[Optional] Simulate orders without executing. Default: --dry-run",
+)
+@click.option(
+    "--tif",
+    type=click.Choice(["day", "gtc", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, ioc, fok. Default: day",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="[Optional] Skip confirmation prompt",
+)
+def buy_portfolio_notional(
+    amount: float,
+    dry_run: bool,
+    tif: str,
+    yes: bool,
+) -> None:
+    """Buy assets proportionally to your current portfolio weights with new cash.
+
+    AMOUNT: The total dollar amount of new cash to deploy.
+    """
+    logger.info(f"Buying ${amount:.2f} of portfolio (Dry Run: {dry_run})...")
+
+    if amount <= 0:
+        logger.error("Amount must be greater than 0.")
+        return
+
+    client = get_trading_client()
+
+    try:
+        positions = client.get_all_positions()
+    except Exception as e:
+        logger.error(f"Failed to fetch positions: {e}")
+        return
+
+    if not positions:
+        logger.error("No positions currently held. Cannot determine portfolio weights.")
+        return
+
+    # Calculate total market value of current equity positions
+    current_positions = {p.symbol: float(p.market_value) for p in positions}
+    total_market_value = sum(current_positions.values())
+
+    if total_market_value == 0:
+        logger.error("Total market value of positions is zero.")
+        return
+
+    orders_to_place = []
+    for symbol, market_value in current_positions.items():
+        weight = market_value / total_market_value
+        buy_notional = amount * weight
+        if buy_notional >= 1.0:  # Alpaca minimum notional order is usually $1
+            orders_to_place.append(
+                {
+                    "symbol": symbol,
+                    "notional": buy_notional,
+                }
+            )
+
+    if not orders_to_place:
+        logger.info(
+            "Calculated buy amounts are too small to place orders (minimum $1 per position)."
+        )
+        return
+
+    # Dry run display
+    order_rows = []
+    for o in orders_to_place:
+        order_rows.append([o["symbol"], format_currency(o["notional"]), "MARKET"])
+
+    print_table("Proposed Buy Orders", ["Symbol", "Notional", "Type"], order_rows)
+
+    if dry_run:
+        logger.info("Dry run complete. Use --execute to place orders.")
+        return
+
+    # Confirmation
+    if not yes:
+        if not click.confirm("Proceed with execution?"):
+            logger.info("Cancelled.")
+            return
+
+    # Execution
+    logger.info("Executing BUY orders...")
+    for o in orders_to_place:
+        try:
+            req = create_market_order(
+                symbol=o["symbol"],
+                side=OrderSide.BUY,
+                notional=round(o["notional"], 2),
+                tif=tif,
+            )
+            submit_order(req)
+        except Exception as e:
+            logger.error(f"Failed to submit buy order for {o['symbol']}: {e}")
+
+    logger.info("Buy portfolio notional complete.")
+
+
+@portfolio.command("take-profit-all")
+@click.argument("percentage", type=float)
+@click.option(
+    "--dry-run/--execute",
+    default=True,
+    help="[Optional] Simulate orders without executing. Default: --dry-run",
+)
+@click.option(
+    "--tif",
+    type=click.Choice(["day", "gtc", "ioc", "fok"]),
+    default=None,
+    help="[Optional] Time in force. Choices: day, gtc, ioc, fok. Default: gtc (day for fractional)",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="[Optional] Skip confirmation prompt",
+)
+def take_profit_all(
+    percentage: float,
+    dry_run: bool,
+    tif: Optional[str],
+    yes: bool,
+) -> None:
+    """Set take-profit limit orders for all open positions.
+
+    PERCENTAGE: Percentage above current price to take profit (e.g., 5 for 5%).
+    """
+    if percentage <= 0:
+        logger.error("Percentage must be greater than 0.")
+        return
+
+    logger.info(
+        f"Setting take-profit for all positions at {percentage}% (Dry Run: {dry_run})..."
+    )
+    client = get_trading_client()
+
+    try:
+        positions = client.get_all_positions()
+    except Exception as e:
+        logger.error(f"Failed to fetch positions: {e}")
+        return
+
+    if not positions:
+        logger.info("No open positions.")
+        return
+
+    orders_to_place = []
+    for pos in positions:
+        if pos.side.name != "LONG":
+            continue
+
+        current_price = float(pos.current_price)
+        limit_price = current_price * (1 + (percentage / 100))
+
+        orders_to_place.append(
+            {
+                "symbol": pos.symbol,
+                "qty": float(pos.qty),
+                "limit_price": limit_price,
+                "current_price": current_price,
+            }
+        )
+
+    if not orders_to_place:
+        logger.info("No valid long positions to apply take-profit.")
+        return
+
+    order_rows = []
+    for o in orders_to_place:
+        order_rows.append(
+            [
+                o["symbol"],
+                str(o["qty"]),
+                format_currency(o["current_price"]),
+                format_currency(o["limit_price"]),
+            ]
+        )
+
+    print_table(
+        "Proposed Take-Profit Orders",
+        ["Symbol", "Qty", "Current Price", "Limit Price"],
+        order_rows,
+    )
+
+    if dry_run:
+        logger.info("Dry run complete. Use --execute to place orders.")
+        return
+
+    if not yes:
+        if not click.confirm("Proceed with execution?"):
+            logger.info("Cancelled.")
+            return
+
+    logger.info("Executing take-profit orders...")
+    for o in orders_to_place:
+        try:
+            is_fractional = not float(o["qty"]).is_integer()
+            order_tif = tif or ("day" if is_fractional else "gtc")
+            req = create_limit_order(
+                symbol=o["symbol"],
+                side=OrderSide.SELL,
+                qty=o["qty"],
+                limit_price=round(o["limit_price"], 2),
+                tif=order_tif,
+            )
+            submit_order(req)
+        except Exception as e:
+            logger.error(f"Failed to submit take-profit for {o['symbol']}: {e}")
+
+    logger.info("Take-profit all complete.")
+
+
+@portfolio.command("trailing-stop-all")
+@click.argument("percentage", type=float)
+@click.option(
+    "--dry-run/--execute",
+    default=True,
+    help="[Optional] Simulate orders without executing. Default: --dry-run",
+)
+@click.option(
+    "--tif",
+    type=click.Choice(["day", "gtc", "ioc", "fok"]),
+    default=None,
+    help="[Optional] Time in force. Choices: day, gtc, ioc, fok. Default: gtc (day for fractional)",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="[Optional] Skip confirmation prompt",
+)
+def trailing_stop_all(
+    percentage: float,
+    dry_run: bool,
+    tif: Optional[str],
+    yes: bool,
+) -> None:
+    """Set trailing stop orders for all open positions.
+
+    PERCENTAGE: Trailing percentage for the stop loss (e.g., 5 for 5%).
+    """
+    if percentage <= 0:
+        logger.error("Percentage must be greater than 0.")
+        return
+
+    logger.info(
+        f"Setting trailing stop for all positions at {percentage}% (Dry Run: {dry_run})..."
+    )
+    client = get_trading_client()
+
+    try:
+        positions = client.get_all_positions()
+    except Exception as e:
+        logger.error(f"Failed to fetch positions: {e}")
+        return
+
+    if not positions:
+        logger.info("No open positions.")
+        return
+
+    orders_to_place = []
+    for pos in positions:
+        if pos.side.name != "LONG":
+            continue
+
+        orders_to_place.append(
+            {"symbol": pos.symbol, "qty": float(pos.qty), "trail_percent": percentage}
+        )
+
+    if not orders_to_place:
+        logger.info("No valid long positions to apply trailing stops.")
+        return
+
+    order_rows = []
+    for o in orders_to_place:
+        order_rows.append([o["symbol"], str(o["qty"]), f"{o['trail_percent']}%"])
+
+    print_table(
+        "Proposed Trailing Stop Orders", ["Symbol", "Qty", "Trail Percent"], order_rows
+    )
+
+    if dry_run:
+        logger.info("Dry run complete. Use --execute to place orders.")
+        return
+
+    if not yes:
+        if not click.confirm("Proceed with execution?"):
+            logger.info("Cancelled.")
+            return
+
+    logger.info("Executing trailing stop orders...")
+    for o in orders_to_place:
+        try:
+            is_fractional = not float(o["qty"]).is_integer()
+            order_tif = tif or ("day" if is_fractional else "gtc")
+            req = create_trailing_stop_order(
+                symbol=o["symbol"],
+                side=OrderSide.SELL,
+                qty=o["qty"],
+                trail_percent=o["trail_percent"],
+                tif=order_tif,
+            )
+            submit_order(req)
+        except Exception as e:
+            logger.error(f"Failed to submit trailing stop for {o['symbol']}: {e}")
+
+    logger.info("Trailing stop all complete.")
+
+
+@portfolio.command("bracket-all")
+@click.argument("take_profit_pct", type=float)
+@click.argument("stop_loss_pct", type=float)
+@click.option(
+    "--stop-loss-limit",
+    "stop_loss_limit_pct",
+    type=float,
+    default=None,
+    help="[Optional] Stop loss limit percentage",
+)
+@click.option(
+    "--tif",
+    type=click.Choice(["day", "gtc", "ioc", "fok"]),
+    default=None,
+    help="[Optional] Time in force. Default: gtc (day for fractional)",
+)
+@click.option(
+    "--dry-run/--execute",
+    default=True,
+    help="[Optional] Simulate orders without executing. Default: --dry-run",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="[Optional] Skip confirmation prompt",
+)
+def bracket_all(
+    take_profit_pct: float,
+    stop_loss_pct: float,
+    stop_loss_limit_pct: Optional[float],
+    tif: Optional[str],
+    dry_run: bool,
+    yes: bool,
+) -> None:
+    """Set OCO bracket orders (take-profit & stop-loss) for all open positions.
+
+    TAKE_PROFIT_PCT: Percentage above current price to take profit (e.g. 5 for 5%).
+    STOP_LOSS_PCT: Percentage below current price to cut losses (e.g. 2 for 2%).
+    """
+    if take_profit_pct <= 0 or stop_loss_pct <= 0:
+        logger.error("Percentages must be greater than 0.")
+        return
+
+    logger.info(
+        f"Setting OCO brackets for all positions (TP: {take_profit_pct}%, SL: {stop_loss_pct}%) (Dry Run: {dry_run})..."
+    )
+    client = get_trading_client()
+
+    try:
+        positions = client.get_all_positions()
+    except Exception as e:
+        logger.error(f"Failed to fetch positions: {e}")
+        return
+
+    if not positions:
+        logger.info("No open positions.")
+        return
+
+    orders_to_place = []
+    for pos in positions:
+        if pos.side.name != "LONG":
+            continue
+
+        current_price = float(pos.current_price)
+        tp_price = current_price * (1 + (take_profit_pct / 100))
+        sl_price = current_price * (1 - (stop_loss_pct / 100))
+        sl_limit_price = (
+            current_price * (1 - (stop_loss_limit_pct / 100))
+            if stop_loss_limit_pct
+            else None
+        )
+
+        orders_to_place.append(
+            {
+                "symbol": pos.symbol,
+                "qty": float(pos.qty),
+                "current_price": current_price,
+                "take_profit_price": tp_price,
+                "stop_loss_price": sl_price,
+                "stop_loss_limit_price": sl_limit_price,
+            }
+        )
+
+    if not orders_to_place:
+        logger.info("No valid long positions to apply brackets.")
+        return
+
+    order_rows = []
+    for o in orders_to_place:
+        sl_str = format_currency(o["stop_loss_price"])
+        if o["stop_loss_limit_price"]:
+            sl_str += f" (Limit: {format_currency(o['stop_loss_limit_price'])})"
+
+        order_rows.append(
+            [
+                o["symbol"],
+                str(o["qty"]),
+                format_currency(o["take_profit_price"]),
+                sl_str,
+            ]
+        )
+
+    print_table(
+        "Proposed OCO Brackets",
+        ["Symbol", "Qty", "Take Profit", "Stop Loss"],
+        order_rows,
+    )
+
+    if dry_run:
+        logger.info("Dry run complete. Use --execute to place orders.")
+        return
+
+    if not yes:
+        if not click.confirm("Proceed with execution?"):
+            logger.info("Cancelled.")
+            return
+
+    logger.info("Executing bracket orders...")
+    for o in orders_to_place:
+        try:
+            is_fractional = not float(o["qty"]).is_integer()
+            order_tif = tif or ("day" if is_fractional else "gtc")
+
+            bracket_params = _build_bracket_params(
+                take_profit=round(o["take_profit_price"], 2),
+                stop_loss=round(o["stop_loss_price"], 2),
+                stop_loss_limit=(
+                    round(o["stop_loss_limit_price"], 2)
+                    if o["stop_loss_limit_price"]
+                    else None
+                ),
+            )
+
+            req = LimitOrderRequest(
+                symbol=o["symbol"],
+                side=OrderSide.SELL,
+                qty=o["qty"],
+                time_in_force=TimeInForce(order_tif),
+                order_class=OrderClass.OCO,
+                limit_price=round(o["take_profit_price"], 2),
+                **bracket_params,
+            )
+            submit_order(req)
+        except Exception as e:
+            logger.error(f"Failed to submit bracket for {o['symbol']}: {e}")
+
+    logger.info("Bracket all complete.")
+
+
+@portfolio.command("liquidate-all")
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="[Optional] Skip confirmation prompt",
+)
+def liquidate_all(yes: bool) -> None:
+    """Panic button: Cancels all open orders and liquidates all positions immediately."""
+    logger.warning("LIQUIDATE ALL requested.")
+    if not yes:
+        if not click.confirm(
+            "WARNING: This will cancel all open orders and sell ALL your positions immediately. Are you sure?"
+        ):
+            logger.info("Cancelled.")
+            return
+
+    client = get_trading_client()
+
+    logger.info("Canceling all open orders and submitting close all positions...")
+    try:
+        responses = client.close_all_positions(cancel_orders=True)
+        if not responses:
+            logger.info("No positions to close.")
+            return
+
+        for resp in responses:
+            if resp.status == 200:
+                logger.info(f"Liquidated position: {resp.symbol}")
+            else:
+                logger.error(f"Failed to liquidate {resp.symbol}: {resp.body}")
+    except Exception as e:
+        logger.error(f"Failed to liquidate all positions: {e}")
