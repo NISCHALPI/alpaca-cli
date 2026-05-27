@@ -1714,3 +1714,116 @@ def rebalance_notional(
                 logger.error(f"Failed to submit buy order for {o['symbol']}: {e}")
 
     logger.info("Rebalancing complete.")
+
+
+@orders.command("sell-portfolio-notional")
+@click.argument("amount", type=float)
+@click.option(
+    "--dry-run/--execute",
+    default=True,
+    help="[Optional] Simulate orders without executing. Default: --dry-run",
+)
+@click.option(
+    "--tif",
+    type=click.Choice(["day", "gtc", "ioc", "fok"]),
+    default="day",
+    help="[Optional] Time in force. Choices: day, gtc, ioc, fok. Default: day",
+)
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="[Optional] Skip confirmation prompt",
+)
+def sell_portfolio_notional(
+    amount: float,
+    dry_run: bool,
+    tif: str,
+    yes: bool,
+) -> None:
+    """Sell a notional amount across all holdings proportionally.
+
+    AMOUNT: The total dollar amount to sell from the portfolio.
+    """
+    logger.info(f"Selling ${amount:.2f} of portfolio (Dry Run: {dry_run})...")
+
+    if amount <= 0:
+        logger.error("Amount must be greater than 0.")
+        return
+
+    client = get_trading_client()
+
+    # Get account and positions
+    try:
+        positions = client.get_all_positions()
+    except Exception as e:
+        logger.error(f"Failed to fetch positions: {e}")
+        return
+
+    if not positions:
+        logger.info("No positions to sell.")
+        return
+
+    # Calculate total market value of current equity positions
+    current_positions = {p.symbol: float(p.market_value) for p in positions}
+    total_market_value = sum(current_positions.values())
+
+    if total_market_value == 0:
+        logger.error("Total market value of positions is zero.")
+        return
+
+    if amount > total_market_value:
+        logger.warning(
+            f"Requested sell amount (${amount:.2f}) exceeds total market value of positions (${total_market_value:.2f})."
+        )
+        if not yes and not click.confirm("Do you still want to proceed by selling the entire portfolio?"):
+            logger.info("Cancelled.")
+            return
+        amount = total_market_value
+
+    orders_to_place = []
+    for symbol, market_value in current_positions.items():
+        weight = market_value / total_market_value
+        sell_notional = amount * weight
+        if sell_notional >= 1.0:  # Alpaca minimum notional order is usually $1
+            orders_to_place.append({
+                "symbol": symbol,
+                "notional": sell_notional,
+            })
+
+    if not orders_to_place:
+        logger.info("Calculated sell amounts are too small to place orders (minimum $1 per position).")
+        return
+
+    # Dry run display
+    order_rows = []
+    for o in orders_to_place:
+        order_rows.append([o["symbol"], format_currency(o["notional"]), "MARKET"])
+
+    print_table("Proposed Sell Orders", ["Symbol", "Notional", "Type"], order_rows)
+
+    if dry_run:
+        logger.info("Dry run complete. Use --execute to place orders.")
+        return
+
+    # Confirmation
+    if not yes:
+        if not click.confirm("Proceed with execution?"):
+            logger.info("Cancelled.")
+            return
+
+    # Execution
+    logger.info("Executing SELL orders...")
+    for o in orders_to_place:
+        try:
+            req = create_market_order(
+                symbol=o["symbol"],
+                side=OrderSide.SELL,
+                notional=round(o["notional"], 2),
+                tif=tif,
+            )
+            submit_order(req)
+        except Exception as e:
+            logger.error(f"Failed to submit sell order for {o['symbol']}: {e}")
+
+    logger.info("Sell portfolio notional complete.")
