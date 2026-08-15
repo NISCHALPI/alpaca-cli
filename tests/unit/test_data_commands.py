@@ -13,7 +13,7 @@ def runner():
 def test_stock_latest(runner):
     """Test 'data stock latest' command."""
     with patch(
-        "alpaca_cli.cli.groups.data.stock.get_stock_data_client"
+        "alpaca_cli.cli.commands.data.stock.get_stock_data_client"
     ) as mock_get_client:
         mock_instance = mock_get_client.return_value
 
@@ -50,7 +50,7 @@ def test_stock_latest(runner):
 def test_crypto_bars(runner):
     """Test 'data crypto bars' command."""
     with patch(
-        "alpaca_cli.cli.groups.data.crypto.get_crypto_data_client"
+        "alpaca_cli.cli.commands.data.crypto.get_crypto_data_client"
     ) as mock_get_client:
         mock_instance = mock_get_client.return_value
 
@@ -91,7 +91,7 @@ def test_crypto_bars(runner):
 def test_options_chain(runner):
     """Test 'data options chain' command."""
     with patch(
-        "alpaca_cli.cli.groups.data.options.OptionHistoricalDataClient"
+        "alpaca_cli.cli.commands.data.options.OptionHistoricalDataClient"
     ) as MockClient:
         mock_instance = MockClient.return_value
 
@@ -152,7 +152,7 @@ def test_news_command(runner):
 def test_option_bars_validation(runner):
     """Test validation in 'data options bars' triggers for underlying symbols."""
     # Invoking with 'NVDA' which is underlying, not option
-    with patch("alpaca_cli.cli.groups.data.options.logger") as mock_logger:
+    with patch("alpaca_cli.cli.commands.data.options.logger") as mock_logger:
         result = runner.invoke(cli, ["data", "options", "bars", "NVDA"])
 
         assert result.exit_code == 0

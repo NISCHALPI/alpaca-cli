@@ -4,9 +4,9 @@ import rich_click as click
 from typing import Optional, List, Any
 from alpaca.trading.requests import GetAssetsRequest
 from alpaca.trading.enums import AssetStatus, AssetClass, AssetExchange
-from alpaca_cli.core.client import get_trading_client
-from alpaca_cli.cli.utils import print_table
-from alpaca_cli.logger.logger import get_logger
+from alpaca_cli.api.client import get_trading_client
+from alpaca_cli.cli.formatters import print_table
+from alpaca_cli.core.logger import get_logger
 
 logger = get_logger("trading.assets")
 

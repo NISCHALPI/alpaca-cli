@@ -3,9 +3,9 @@
 import rich_click as click
 from typing import List, Any, Optional
 from datetime import datetime
-from alpaca_cli.core.client import get_trading_client
-from alpaca_cli.cli.utils import print_table, format_currency
-from alpaca_cli.logger.logger import get_logger
+from alpaca_cli.api.client import get_trading_client
+from alpaca_cli.cli.formatters import print_table, format_currency
+from alpaca_cli.core.logger import get_logger
 from alpaca.trading.requests import GetPortfolioHistoryRequest
 
 logger = get_logger("trading.account")

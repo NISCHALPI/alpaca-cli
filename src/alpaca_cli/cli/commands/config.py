@@ -1,7 +1,7 @@
 import rich_click as click
 from alpaca_cli.core.config import config, CREDENTIALS_FILE, STATE_FILE
-from alpaca_cli.core.client import get_trading_client
-from alpaca_cli.logger.logger import get_logger
+from alpaca_cli.api.client import get_trading_client
+from alpaca_cli.core.logger import get_logger
 
 logger = get_logger("config")
 

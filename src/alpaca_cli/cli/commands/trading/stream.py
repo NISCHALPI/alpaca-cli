@@ -2,8 +2,8 @@
 
 import rich_click as click
 import asyncio
-from alpaca_cli.cli.utils import format_currency
-from alpaca_cli.logger.logger import get_logger
+from alpaca_cli.cli.formatters import format_currency
+from alpaca_cli.core.logger import get_logger
 
 logger = get_logger("trading.stream")
 

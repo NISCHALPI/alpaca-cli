@@ -1,11 +1,12 @@
 """Main CLI entry point - Alpaca CLI Trading Tool."""
 
 import rich_click as click
-from alpaca_cli.cli.groups.config import configuration as config_cmd
-from alpaca_cli.cli.groups.trading import trading
-from alpaca_cli.cli.groups.data import data
-from alpaca_cli.cli.groups.dashboard import dashboard
-from alpaca_cli.logger.logger import configure_logging
+from alpaca_cli.cli.commands.config import configuration as config_cmd
+from alpaca_cli.cli.commands.trading import trading
+from alpaca_cli.cli.commands.data import data
+from alpaca_cli.cli.commands.dashboard import dashboard
+from alpaca_cli.cli.commands.portfolio import portfolio
+from alpaca_cli.core.logger import configure_logging
 
 # Use Rich markup for all help text
 click.rich_click.USE_RICH_MARKUP = True
@@ -73,6 +74,7 @@ cli.add_command(trading)
 cli.add_command(data)
 cli.add_command(dashboard)
 cli.add_command(config_cmd, name="config")
+cli.add_command(portfolio)
 
 
 # --- COMMAND ALIASES ---
@@ -86,7 +88,7 @@ cli.add_command(config_cmd, name="config")
 @click.option("--tif", default="day", help="Time in Force")
 def buy_alias(symbol: str, qty, notional, tif: str):
     """Quick buy (alias for 'trading orders buy market')."""
-    from alpaca_cli.cli.groups.trading.orders import buy_market
+    from alpaca_cli.cli.commands.trading.orders import buy_market
     from click import Context
 
     ctx = Context(buy_market)
@@ -110,7 +112,7 @@ def buy_alias(symbol: str, qty, notional, tif: str):
 @click.option("--tif", default="day", help="Time in Force")
 def sell_alias(symbol: str, qty, notional, tif: str):
     """Quick sell (alias for 'trading orders sell market')."""
-    from alpaca_cli.cli.groups.trading.orders import sell_market
+    from alpaca_cli.cli.commands.trading.orders import sell_market
     from click import Context
 
     ctx = Context(sell_market)
@@ -130,7 +132,7 @@ def sell_alias(symbol: str, qty, notional, tif: str):
 @cli.command("pos")
 def pos_alias():
     """Show positions (alias for 'trading positions list')."""
-    from alpaca_cli.cli.groups.trading.positions import list_positions
+    from alpaca_cli.cli.commands.trading.positions import list_positions
     from click import Context
 
     ctx = Context(list_positions)
@@ -140,7 +142,7 @@ def pos_alias():
 @cli.command("status")
 def status_alias():
     """Show account status (alias for 'trading account status')."""
-    from alpaca_cli.cli.groups.trading.account import status
+    from alpaca_cli.cli.commands.trading.account import status
     from click import Context
 
     ctx = Context(status)
@@ -152,7 +154,7 @@ def status_alias():
 @click.option("--feed", type=click.Choice(["iex", "sip"]), default="iex")
 def quote_alias(symbols: str, feed: str):
     """Get latest quote/price (alias for 'data stock latest')."""
-    from alpaca_cli.cli.groups.data.stock import stock_latest
+    from alpaca_cli.cli.commands.data.stock import stock_latest
     from click import Context
 
     ctx = Context(stock_latest)
@@ -162,7 +164,7 @@ def quote_alias(symbols: str, feed: str):
 @cli.command("clock")
 def clock_alias():
     """Market clock (alias for 'trading clock')."""
-    from alpaca_cli.cli.groups.trading.market_info import clock
+    from alpaca_cli.cli.commands.trading.market_info import clock
     from click import Context
 
     ctx = Context(clock)

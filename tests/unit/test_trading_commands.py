@@ -19,7 +19,7 @@ def runner():
 
 @pytest.fixture
 def mock_trading_client():
-    with patch("alpaca_cli.cli.groups.trading.account.get_trading_client") as mock:
+    with patch("alpaca_cli.cli.commands.trading.account.get_trading_client") as mock:
         client = MagicMock()
         mock.return_value = client
         yield client
@@ -84,7 +84,7 @@ def test_account_status(runner, mock_trading_client):
 def test_positions_list(runner):
     """Test 'trading positions list' command."""
     with patch(
-        "alpaca_cli.cli.groups.trading.positions.get_trading_client"
+        "alpaca_cli.cli.commands.trading.positions.get_trading_client"
     ) as mock_get_client:
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
@@ -118,10 +118,10 @@ def test_orders_buy_market(runner):
     """Test 'trading orders buy market' command."""
     with (
         patch(
-            "alpaca_cli.cli.groups.trading.orders.get_trading_client"
+            "alpaca_cli.cli.commands.trading.orders.get_trading_client"
         ) as mock_get_client,
-        patch("alpaca_cli.cli.groups.trading.orders.logger") as mock_logger,
-        patch("alpaca_cli.cli.groups.trading.orders.print_table") as mock_print_table,
+        patch("alpaca_cli.cli.commands.trading.orders.logger") as mock_logger,
+        patch("alpaca_cli.cli.commands.trading.orders.print_table") as mock_print_table,
     ):
 
         mock_client = MagicMock()

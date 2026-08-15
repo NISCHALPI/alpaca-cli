@@ -2,7 +2,7 @@
 
 import functools
 from typing import Callable, TypeVar, Any
-from alpaca_cli.logger.logger import get_logger
+from alpaca_cli.core.logger import get_logger
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -45,7 +45,7 @@ def require_market_open(allow_extended: bool = False) -> Callable[[F], F]:
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            from alpaca_cli.core.client import get_trading_client
+            from alpaca_cli.api.client import get_trading_client
 
             # Check if force flag is passed
             force = kwargs.get("force", False)

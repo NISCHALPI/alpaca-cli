@@ -29,7 +29,7 @@ def mock_config():
 @pytest.fixture
 def mock_trading_client():
     """Mock TradingClient for tests."""
-    with patch("alpaca_cli.core.client.TradingClient") as mock_cls:
+    with patch("alpaca_cli.api.client.TradingClient") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
 
@@ -52,7 +52,7 @@ def mock_trading_client():
 @pytest.fixture
 def mock_stock_data_client():
     """Mock StockHistoricalDataClient for tests."""
-    with patch("alpaca_cli.core.client.StockHistoricalDataClient") as mock_cls:
+    with patch("alpaca_cli.api.client.StockHistoricalDataClient") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         yield mock_client
@@ -61,7 +61,7 @@ def mock_stock_data_client():
 @pytest.fixture
 def mock_crypto_data_client():
     """Mock CryptoHistoricalDataClient for tests."""
-    with patch("alpaca_cli.core.client.CryptoHistoricalDataClient") as mock_cls:
+    with patch("alpaca_cli.api.client.CryptoHistoricalDataClient") as mock_cls:
         mock_client = MagicMock()
         mock_cls.return_value = mock_client
         yield mock_client

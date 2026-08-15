@@ -2,7 +2,7 @@
 
 import pytest
 
-from alpaca_cli.cli.utils import calculate_rebalancing_orders, validate_not_nan
+from alpaca_cli.services.portfolio import calculate_rebalancing_orders, validate_not_nan
 
 
 class TestValidateNotNan:

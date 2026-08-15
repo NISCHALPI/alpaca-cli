@@ -8,10 +8,10 @@ from rich.text import Text
 from rich.align import Align
 from rich import box
 
-from alpaca_cli.core.client import get_trading_client, get_stock_data_client
+from alpaca_cli.api.client import get_trading_client, get_stock_data_client
 from alpaca_cli.core.config import config
-from alpaca_cli.logger.logger import get_logger
-from alpaca_cli.cli.utils import format_currency
+from alpaca_cli.core.logger import get_logger
+from alpaca_cli.cli.formatters import format_currency
 from alpaca_cli.cli.theme import (
     colors,
     icons,

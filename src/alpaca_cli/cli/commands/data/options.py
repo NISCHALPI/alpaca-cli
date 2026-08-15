@@ -15,8 +15,8 @@ from alpaca.data.requests import (
 from alpaca.data.timeframe import TimeFrame
 from alpaca.common.enums import Sort
 from alpaca_cli.core.config import config
-from alpaca_cli.cli.utils import print_table, format_currency
-from alpaca_cli.logger.logger import get_logger
+from alpaca_cli.cli.formatters import print_table, format_currency
+from alpaca_cli.core.logger import get_logger
 
 logger = get_logger("data.options")
 

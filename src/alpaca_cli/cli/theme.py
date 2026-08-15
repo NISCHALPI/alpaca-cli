@@ -238,7 +238,7 @@ def styled_table(
     border_color: str = colors.BORDER,
 ) -> None:
     """Display a styled table with consistent formatting."""
-    from alpaca_cli.cli.utils import get_mode_indicator
+    from alpaca_cli.cli.formatters import get_mode_indicator
 
     # Add mode indicator to title if requested
     full_title = f"{get_mode_indicator()} {title}" if show_mode else title
@@ -335,7 +335,7 @@ def format_status(status: str) -> str:
 
 def format_pl(value: float, pct: float, include_icon: bool = True) -> str:
     """Format P/L value with color and optional icon."""
-    from alpaca_cli.cli.utils import format_currency
+    from alpaca_cli.cli.formatters import format_currency
 
     color = get_pl_color(pct)
     icon = f"{get_pl_icon(pct)} " if include_icon else ""
@@ -375,7 +375,7 @@ def create_table(
     Returns:
         A styled Rich Table ready to receive rows
     """
-    from alpaca_cli.cli.utils import get_mode_indicator
+    from alpaca_cli.cli.formatters import get_mode_indicator
 
     # Add mode indicator if requested
     full_title = f"{get_mode_indicator()} {title}" if show_mode else title
@@ -412,7 +412,7 @@ def create_kv_table(title: str, show_mode: bool = True) -> Table:
     Returns:
         A styled Rich Table with Label and Value columns
     """
-    from alpaca_cli.cli.utils import get_mode_indicator
+    from alpaca_cli.cli.formatters import get_mode_indicator
 
     full_title = f"{get_mode_indicator()} {title}" if show_mode else title
 
@@ -472,7 +472,7 @@ def create_stream_table(title: str, columns: List[str]) -> Table:
 
 def format_price(value: Any) -> str:
     """Format a price value with theme styling."""
-    from alpaca_cli.cli.utils import format_currency
+    from alpaca_cli.cli.formatters import format_currency
 
     return f"[{colors.PRICE}]{format_currency(value)}[/{colors.PRICE}]"
 
@@ -502,7 +502,7 @@ def format_pl_simple(value: float, pct: float) -> str:
     Returns:
         Formatted string with color based on P/L
     """
-    from alpaca_cli.cli.utils import format_currency
+    from alpaca_cli.cli.formatters import format_currency
 
     color = get_pl_color(pct)
     sign = "+" if pct >= 0 else ""

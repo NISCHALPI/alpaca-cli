@@ -10,15 +10,17 @@
 ```mermaid
 graph TD
     User((User)) -->|Commands & Args| CLI[CLI Layer<br/>src/alpaca_cli/cli]
-    CLI -->|Core Utilities & Output| Core[Core Layer<br/>src/alpaca_cli/core]
-    Core -->|Request/Response| AlpacaSDK[Alpaca-py SDK]
-    AlpacaSDK -->|REST/WebSockets| AlpacaAPI[Alpaca Markets API]
+    CLI -->|Core Utilities| Core[Core Layer<br/>src/alpaca_cli/core]
+    CLI -->|Delegates Work| Services[Services Layer<br/>src/alpaca_cli/services]
+    Services -->|Request Objects| API[API Layer<br/>src/alpaca_cli/api]
+    API -->|REST/WebSockets| AlpacaAPI[Alpaca Markets API]
 ```
 
 ### Module Responsibilities
-- **`core/`**: Handles initialization of client singletons (`client.py`), application configurations and credentials (`config.py`), and foundational constant values (`constants.py`).
-- **`cli/`**: Contains the main CLI entry point (`main.py`), theming configurations utilizing the Solarized Dark palette (`theme.py`), utility functions for display and calculation (`utils.py`), and sub-command groups (`groups/`).
-- **`logger/`**: Sets up custom logging capabilities using `RichHandler` tailored for a 120-column forced width to ensure crisp CLI output (`logger.py`).
+- **`api/`**: Manages direct connections to Alpaca API through client singletons (`client.py`).
+- **`services/`**: Contains pure Python business logic, financial math, and order builders independent of the CLI (e.g., `portfolio.py`, `orders.py`).
+- **`core/`**: Handles foundational logic including application configurations, credentials (`config.py`), constants (`constants.py`), and custom logging (`logger.py`).
+- **`cli/`**: The presentation layer. Contains the main entry point (`main.py`), UI formatting logic (`formatters.py`), theming (`theme.py`), and all click commands organized cleanly inside `cli/commands/` (e.g., `trading`, `data`, `portfolio`).
 
 ## Configuration & Credentials
 The application utilizes a cascading configuration priority:

@@ -1,31 +1,32 @@
-"""Stock market data commands - bars, quotes, trades, latest, snapshot, stream."""
+"""Crypto market data commands - bars, quotes, trades, latest, snapshot, orderbook, stream."""
 
 import rich_click as click
 import asyncio
 from typing import Optional
 from datetime import datetime, timedelta, timezone
-from alpaca.data.live import StockDataStream
+from alpaca.data.live import CryptoDataStream
 from alpaca.data.requests import (
-    StockBarsRequest,
-    StockQuotesRequest,
-    StockTradesRequest,
-    StockLatestQuoteRequest,
-    StockLatestTradeRequest,
-    StockLatestBarRequest,
-    StockSnapshotRequest,
+    CryptoBarsRequest,
+    CryptoQuoteRequest,
+    CryptoTradesRequest,
+    CryptoLatestQuoteRequest,
+    CryptoLatestTradeRequest,
+    CryptoLatestBarRequest,
+    CryptoSnapshotRequest,
+    CryptoLatestOrderbookRequest,
 )
 from alpaca.data.timeframe import TimeFrame
-from alpaca.data.enums import DataFeed, Adjustment
+from alpaca.data.enums import CryptoFeed
 from alpaca.common.enums import Sort
 from alpaca_cli.core.config import config
-from alpaca_cli.core.client import get_stock_data_client
-from alpaca_cli.cli.utils import print_table, format_currency
-from alpaca_cli.logger.logger import get_logger
+from alpaca_cli.api.client import get_crypto_data_client
+from alpaca_cli.cli.formatters import print_table, format_currency
+from alpaca_cli.core.logger import get_logger
 from rich.live import Live
 from rich.table import Table
 from rich import box
 
-logger = get_logger("data.stock")
+logger = get_logger("data.crypto")
 
 
 def get_timeframe(tf_str: str) -> TimeFrame:
@@ -38,28 +39,13 @@ def get_timeframe(tf_str: str) -> TimeFrame:
     }.get(tf_str, TimeFrame.Day)
 
 
-def get_stock_feed(feed_str: Optional[str]) -> DataFeed:
-    return DataFeed.SIP if feed_str and feed_str.lower() == "sip" else DataFeed.IEX
-
-
-def get_adjustment(adj_str: Optional[str]) -> Optional[Adjustment]:
-    if not adj_str:
-        return None
-    return {
-        "raw": Adjustment.RAW,
-        "split": Adjustment.SPLIT,
-        "dividend": Adjustment.DIVIDEND,
-        "all": Adjustment.ALL,
-    }.get(adj_str.lower())
-
-
 @click.group()
-def stock() -> None:
-    """Stock market data (bars, quotes, trades, latest, snapshot, stream)."""
+def crypto() -> None:
+    """Crypto market data (bars, quotes, trades, latest, snapshot, orderbook, stream)."""
     pass
 
 
-@stock.command("bars")
+@crypto.command("bars")
 @click.argument("symbols")
 @click.option(
     "--timeframe",
@@ -87,51 +73,30 @@ def stock() -> None:
     help="[Optional] Maximum number of bars to return. Default: 100",
 )
 @click.option(
-    "--adjustment",
-    type=click.Choice(["raw", "split", "dividend", "all"]),
-    default=None,
-    help="[Optional] Price adjustment type. Choices: raw, split, dividend, all",
-)
-@click.option(
-    "--feed",
-    type=click.Choice(["iex", "sip"]),
-    default="iex",
-    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
-)
-@click.option(
     "--sort",
     type=click.Choice(["asc", "desc"]),
     default=None,
     help="[Optional] Sort order for results. Choices: asc, desc",
 )
-@click.option(
-    "--currency",
-    type=str,
-    default=None,
-    help="[Optional] Currency for price results (e.g., USD, EUR)",
-)
-def stock_bars(
+def crypto_bars(
     symbols: str,
     timeframe: str,
     start: Optional[str],
     end: Optional[str],
     limit: int,
-    adjustment: Optional[str],
-    feed: str,
     sort: Optional[str],
-    currency: Optional[str],
 ) -> None:
-    """Get historical stock bars (OHLCV)."""
+    """Get historical crypto bars (OHLCV)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
-    logger.info(f"Fetching {timeframe} bars for {symbol_list}...")
+    logger.info(f"Fetching {timeframe} crypto bars for {symbol_list}...")
 
-    client = get_stock_data_client()
+    client = get_crypto_data_client()
 
     end_dt = (
         datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         if end
-        else datetime.now(timezone.utc) - timedelta(minutes=30)
+        else datetime.now(timezone.utc)
     )
     start_dt = (
         datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -140,18 +105,15 @@ def stock_bars(
     )
 
     try:
-        req = StockBarsRequest(
+        req = CryptoBarsRequest(
             symbol_or_symbols=symbol_list,
             timeframe=get_timeframe(timeframe),
             start=start_dt,
             end=end_dt,
             limit=limit,
-            adjustment=get_adjustment(adjustment),
-            feed=get_stock_feed(feed),
             sort=Sort.ASC if sort == "asc" else Sort.DESC if sort else None,
-            currency=currency,
         )
-        bars = client.get_stock_bars(req)
+        bars = client.get_crypto_bars(req)
 
         if not bars.data:
             logger.info("No data found.")
@@ -181,7 +143,7 @@ def stock_bars(
         logger.error(f"Failed to fetch bars: {e}")
 
 
-@stock.command("quotes")
+@crypto.command("quotes")
 @click.argument("symbols")
 @click.option(
     "--start",
@@ -202,31 +164,24 @@ def stock_bars(
     help="[Optional] Maximum number of quotes to return. Default: 100",
 )
 @click.option(
-    "--feed",
-    type=click.Choice(["iex", "sip"]),
-    default="iex",
-    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
-)
-@click.option(
     "--sort",
     type=click.Choice(["asc", "desc"]),
     default=None,
     help="[Optional] Sort order for results. Choices: asc, desc",
 )
-def stock_quotes(
+def crypto_quotes(
     symbols: str,
     start: str,
     end: Optional[str],
     limit: int,
-    feed: str,
     sort: Optional[str],
 ) -> None:
-    """Get historical stock quotes (NBBO)."""
+    """Get historical crypto quotes."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
-    logger.info(f"Fetching quotes for {symbol_list}...")
+    logger.info(f"Fetching crypto quotes for {symbol_list}...")
 
-    client = get_stock_data_client()
+    client = get_crypto_data_client()
 
     start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_dt = (
@@ -234,15 +189,14 @@ def stock_quotes(
     )
 
     try:
-        req = StockQuotesRequest(
+        req = CryptoQuoteRequest(
             symbol_or_symbols=symbol_list,
             start=start_dt,
             end=end_dt,
             limit=limit,
-            feed=get_stock_feed(feed),
             sort=Sort.ASC if sort == "asc" else Sort.DESC if sort else None,
         )
-        quotes = client.get_stock_quotes(req)
+        quotes = client.get_crypto_quotes(req)
 
         if not quotes.data:
             logger.info("No data found.")
@@ -258,21 +212,17 @@ def stock_quotes(
                     str(q.bid_size),
                     format_currency(q.ask_price),
                     str(q.ask_size),
-                    q.bid_exchange or "-",
-                    q.ask_exchange or "-",
                 ]
                 for q in list(quotes[sym])[:50]
-            ]  # Limit rows for display
+            ]
             print_table(
-                f"{sym} Quotes",
-                ["Time", "Bid", "Bid Size", "Ask", "Ask Size", "Bid Ex", "Ask Ex"],
-                rows,
+                f"{sym} Quotes", ["Time", "Bid", "Bid Size", "Ask", "Ask Size"], rows
             )
     except Exception as e:
         logger.error(f"Failed to fetch quotes: {e}")
 
 
-@stock.command("trades")
+@crypto.command("trades")
 @click.argument("symbols")
 @click.option(
     "--start",
@@ -293,31 +243,24 @@ def stock_quotes(
     help="[Optional] Maximum number of trades to return. Default: 100",
 )
 @click.option(
-    "--feed",
-    type=click.Choice(["iex", "sip"]),
-    default="iex",
-    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
-)
-@click.option(
     "--sort",
     type=click.Choice(["asc", "desc"]),
     default=None,
     help="[Optional] Sort order for results. Choices: asc, desc",
 )
-def stock_trades(
+def crypto_trades(
     symbols: str,
     start: str,
     end: Optional[str],
     limit: int,
-    feed: str,
     sort: Optional[str],
 ) -> None:
-    """Get historical stock trades (time & sales)."""
+    """Get historical crypto trades."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
-    logger.info(f"Fetching trades for {symbol_list}...")
+    logger.info(f"Fetching crypto trades for {symbol_list}...")
 
-    client = get_stock_data_client()
+    client = get_crypto_data_client()
 
     start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_dt = (
@@ -325,15 +268,14 @@ def stock_trades(
     )
 
     try:
-        req = StockTradesRequest(
+        req = CryptoTradesRequest(
             symbol_or_symbols=symbol_list,
             start=start_dt,
             end=end_dt,
             limit=limit,
-            feed=get_stock_feed(feed),
             sort=Sort.ASC if sort == "asc" else Sort.DESC if sort else None,
         )
-        trades = client.get_stock_trades(req)
+        trades = client.get_crypto_trades(req)
 
         if not trades.data:
             logger.info("No data found.")
@@ -347,55 +289,35 @@ def stock_trades(
                     t.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                     format_currency(t.price),
                     str(t.size),
-                    t.exchange or "-",
-                    str(t.id) if t.id else "-",
+                    str(t.id) if hasattr(t, "id") else "-",
                 ]
                 for t in list(trades[sym])[:50]
             ]
-            print_table(
-                f"{sym} Trades", ["Time", "Price", "Size", "Exchange", "Trade ID"], rows
-            )
+            print_table(f"{sym} Trades", ["Time", "Price", "Size", "Trade ID"], rows)
     except Exception as e:
         logger.error(f"Failed to fetch trades: {e}")
 
 
-@stock.command("latest")
+@crypto.command("latest")
 @click.argument("symbols")
-@click.option(
-    "--feed",
-    type=click.Choice(["iex", "sip"]),
-    default="iex",
-    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
-)
-@click.option(
-    "--currency",
-    type=str,
-    default=None,
-    help="[Optional] Currency for price results (e.g., USD, EUR)",
-)
-def stock_latest(symbols: str, feed: str, currency: Optional[str]) -> None:
-    """Get latest stock quote, trade, and bar."""
+def crypto_latest(symbols: str) -> None:
+    """Get latest crypto quote, trade, and bar."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
-    logger.info(f"Fetching latest data for {symbol_list}...")
+    logger.info(f"Fetching latest crypto data for {symbol_list}...")
 
-    client = get_stock_data_client()
-    feed_enum = get_stock_feed(feed)
+    client = get_crypto_data_client()
 
     try:
-        q_req = StockLatestQuoteRequest(
-            symbol_or_symbols=symbol_list, feed=feed_enum, currency=currency
+        quotes = client.get_crypto_latest_quote(
+            CryptoLatestQuoteRequest(symbol_or_symbols=symbol_list)
         )
-        t_req = StockLatestTradeRequest(
-            symbol_or_symbols=symbol_list, feed=feed_enum, currency=currency
+        trades = client.get_crypto_latest_trade(
+            CryptoLatestTradeRequest(symbol_or_symbols=symbol_list)
         )
-        b_req = StockLatestBarRequest(
-            symbol_or_symbols=symbol_list, feed=feed_enum, currency=currency
+        bars = client.get_crypto_latest_bar(
+            CryptoLatestBarRequest(symbol_or_symbols=symbol_list)
         )
-
-        quotes = client.get_stock_latest_quote(q_req)
-        trades = client.get_stock_latest_trade(t_req)
-        bars = client.get_stock_latest_bar(b_req)
 
         for sym in symbol_list:
             rows = []
@@ -421,33 +343,20 @@ def stock_latest(symbols: str, feed: str, currency: Optional[str]) -> None:
         logger.error(f"Failed to fetch latest data: {e}")
 
 
-@stock.command("snapshot")
+@crypto.command("snapshot")
 @click.argument("symbols")
-@click.option(
-    "--feed",
-    type=click.Choice(["iex", "sip"]),
-    default="iex",
-    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
-)
-@click.option(
-    "--currency",
-    type=str,
-    default=None,
-    help="[Optional] Currency for price results (e.g., USD, EUR)",
-)
-def stock_snapshot(symbols: str, feed: str, currency: Optional[str]) -> None:
-    """Get stock snapshot (quote, trade, bar, prev close)."""
+def crypto_snapshot(symbols: str) -> None:
+    """Get crypto snapshot (quote, trade, bar, prev close)."""
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
-    logger.info(f"Fetching snapshots for {symbol_list}...")
+    logger.info(f"Fetching crypto snapshots for {symbol_list}...")
 
-    client = get_stock_data_client()
+    client = get_crypto_data_client()
 
     try:
-        req = StockSnapshotRequest(
-            symbol_or_symbols=symbol_list, feed=get_stock_feed(feed), currency=currency
+        snapshots = client.get_crypto_snapshot(
+            CryptoSnapshotRequest(symbol_or_symbols=symbol_list)
         )
-        snapshots = client.get_stock_snapshot(req)
 
         for sym in symbol_list:
             if sym not in snapshots:
@@ -479,9 +388,6 @@ def stock_snapshot(symbols: str, feed: str, currency: Optional[str]) -> None:
                     ["Minute Bar Close", format_currency(snap.minute_bar.close)]
                 )
             if snap.daily_bar:
-                rows.append(["Daily Open", format_currency(snap.daily_bar.open)])
-                rows.append(["Daily High", format_currency(snap.daily_bar.high)])
-                rows.append(["Daily Low", format_currency(snap.daily_bar.low)])
                 rows.append(["Daily Close", format_currency(snap.daily_bar.close)])
                 rows.append(["Daily Volume", str(snap.daily_bar.volume)])
             if snap.previous_daily_bar:
@@ -493,24 +399,46 @@ def stock_snapshot(symbols: str, feed: str, currency: Optional[str]) -> None:
         logger.error(f"Failed to fetch snapshot: {e}")
 
 
-@stock.command("stream")
+@crypto.command("orderbook")
 @click.argument("symbols")
-@click.option(
-    "--feed",
-    type=click.Choice(["iex", "sip"]),
-    default="iex",
-    help="[Optional] Data feed source. Choices: iex, sip. Default: iex",
-)
-def stock_stream(symbols: str, feed: str) -> None:
-    """Stream live stock quotes and trades."""
+def crypto_orderbook(symbols: str) -> None:
+    """Get crypto orderbook (bid/ask depth)."""
+    config.validate()
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+    logger.info(f"Fetching orderbook for {symbol_list}...")
+
+    client = get_crypto_data_client()
+
+    try:
+        result = client.get_crypto_latest_orderbook(
+            CryptoLatestOrderbookRequest(symbol_or_symbols=symbol_list)
+        )
+
+        for sym in symbol_list:
+            if sym not in result:
+                continue
+            ob = result[sym]
+            bid_rows = [[format_currency(b.price), str(b.size)] for b in ob.bids[:10]]
+            ask_rows = [[format_currency(a.price), str(a.size)] for a in ob.asks[:10]]
+            print_table(f"{sym} Bids", ["Price", "Size"], bid_rows)
+            print_table(f"{sym} Asks", ["Price", "Size"], ask_rows)
+    except Exception as e:
+        logger.error(f"Failed to get orderbook: {e}")
+
+
+@crypto.command("stream")
+@click.argument("symbols")
+def crypto_stream(symbols: str) -> None:
+    """Stream live crypto quotes and trades."""
     import logging as stdlib_logging
 
     config.validate()
     symbol_list = [s.strip().upper() for s in symbols.split(",")]
-    logger.info(f"Starting stock stream for {symbol_list}...")
+    logger.info(f"Starting crypto stream for {symbol_list}...")
 
-    feed_enum = get_stock_feed(feed)
-    stream_client = StockDataStream(config.API_KEY, config.API_SECRET, feed=feed_enum)
+    stream_client = CryptoDataStream(
+        config.API_KEY, config.API_SECRET, feed=CryptoFeed.US
+    )
 
     data = {s: {"bid": "-", "ask": "-", "trade": "-", "time": "-"} for s in symbol_list}
 
@@ -518,7 +446,7 @@ def stock_stream(symbols: str, feed: str) -> None:
         from alpaca_cli.cli.theme import create_stream_table
 
         table = create_stream_table(
-            "Live Stock Data", ["Symbol", "Bid", "Ask", "Last Trade", "Time"]
+            "Live Crypto Data", ["Symbol", "Bid", "Ask", "Last Trade", "Time"]
         )
         for sym in symbol_list:
             d = data[sym]

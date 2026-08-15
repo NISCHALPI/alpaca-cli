@@ -4,8 +4,8 @@ import rich_click as click
 from typing import Optional
 from datetime import datetime
 from alpaca_cli.core.config import config
-from alpaca_cli.cli.utils import print_table
-from alpaca_cli.logger.logger import get_logger
+from alpaca_cli.cli.formatters import print_table
+from alpaca_cli.core.logger import get_logger
 
 logger = get_logger("data.news")
 

@@ -133,7 +133,7 @@ class Config:
 
         # Reset cached clients to use new credentials
         # Import here to avoid circular dependency
-        from alpaca_cli.core.client import reset_all_clients
+        from alpaca_cli.api.client import reset_all_clients
 
         reset_all_clients()
 
