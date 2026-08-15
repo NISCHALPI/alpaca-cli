@@ -14,7 +14,35 @@ from alpaca.data.historical.news import NewsClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca_cli.core.config import config
 
+def generate_sparkline(prices: list[float]) -> str:
+    """Generate an 8-level ASCII Unicode sparkline string from a price series."""
+    if not prices or len(prices) < 2:
+        return " ─── "
+        
+    min_p = min(prices)
+    max_p = max(prices)
+    rng = max_p - min_p
+    
+    ticks = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█']
+    if rng == 0:
+        return ticks[3] * min(len(prices), 8)
+        
+    result = []
+    if len(prices) > 8:
+        step = len(prices) / 8.0
+        sampled = [prices[int(i * step)] for i in range(8)]
+    else:
+        sampled = prices
+        
+    for p in sampled:
+        idx = int(((p - min_p) / rng) * 7)
+        idx = max(0, min(7, idx))
+        result.append(ticks[idx])
+        
+    return "".join(result)
+
 class AssetInfoModal(ModalScreen):
+    BINDINGS = [("escape", "dismiss", "Close")]
     CSS = """
     AssetInfoModal {
         align: center middle;
@@ -89,6 +117,7 @@ class AssetInfoModal(ModalScreen):
             self.dismiss()
 
 class OrderInfoModal(ModalScreen):
+    BINDINGS = [("escape", "dismiss", "Close")]
     CSS = """
     OrderInfoModal {
         align: center middle;
@@ -172,6 +201,7 @@ class OrderInfoModal(ModalScreen):
             self.dismiss()
 
 class PositionModal(ModalScreen):
+    BINDINGS = [("escape", "dismiss", "Close")]
     CSS = """
     PositionModal {
         align: center middle;
@@ -247,6 +277,7 @@ class PositionModal(ModalScreen):
             self.dismiss()
 
 class NewsReaderModal(ModalScreen):
+    BINDINGS = [("escape", "dismiss", "Close")]
     CSS = """
     NewsReaderModal {
         align: center middle;
@@ -340,7 +371,83 @@ class NewsReaderModal(ModalScreen):
         elif event.button.id == "modal_close_btn":
             self.dismiss()
 
+class ActivityLogModal(ModalScreen):
+    BINDINGS = [
+        ("escape", "dismiss", "Close"),
+        ("ctrl+l", "dismiss", "Close Log"),
+    ]
+    CSS = """
+    ActivityLogModal {
+        align: center middle;
+    }
+    #log-modal-dialog {
+        width: 90%;
+        height: 85%;
+        padding: 1 2;
+        border: heavy $accent;
+        background: $surface;
+    }
+    .log-modal-title {
+        text-align: center;
+        text-style: bold;
+        color: $accent;
+        width: 100%;
+        margin-bottom: 1;
+    }
+    #modal_execution_log_drawer {
+        height: 1fr;
+        width: 100%;
+        border: round $accent;
+        background: $panel;
+        padding: 1;
+    }
+    #log_modal_btn_container {
+        margin-top: 1;
+        height: auto;
+    }
+    .log-modal-btn {
+        width: 1fr;
+        margin: 0 1;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="log-modal-dialog"):
+            yield Label("System Activity & Execution Log [dim](Ctrl+L / Esc to Close)[/dim]", classes="log-modal-title")
+            yield Log(id="modal_execution_log_drawer")
+            with Horizontal(id="log_modal_btn_container"):
+                yield Button("Clear Log", id="modal_clear_log_btn", variant="error", classes="log-modal-btn")
+                yield Button("Close (Esc)", id="modal_close_btn", variant="primary", classes="log-modal-btn")
+
+    def on_mount(self) -> None:
+        try:
+            log_widget = self.query_one("#modal_execution_log_drawer", Log)
+            for line in getattr(self.app, "log_buffer", []):
+                log_widget.write_line(line)
+        except Exception:
+            pass
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "modal_clear_log_btn":
+            try:
+                self.query_one("#modal_execution_log_drawer", Log).clear()
+                if hasattr(self.app, "log_buffer"):
+                    self.app.log_buffer.clear()
+                self.app.notify("Activity log cleared", severity="information")
+            except Exception:
+                pass
+        elif event.button.id == "modal_close_btn":
+            self.dismiss()
+
 class DashboardApp(App):
+    BINDINGS = [
+        ("ctrl+b", "quick_buy", "Quick Buy"),
+        ("ctrl+k", "liquidate_selected", "Liquidate Selected"),
+        ("ctrl+r", "refresh_all", "Refresh All"),
+        ("ctrl+l", "toggle_activity_log", "Activity Log"),
+        ("slash", "focus_search", "Search Focus"),
+    ]
+
     CSS = """
     .form-group {
         margin: 1;
@@ -446,6 +553,16 @@ class DashboardApp(App):
         text-style: bold;
         margin-bottom: 1;
     }
+    #log_tab {
+        layout: vertical;
+    }
+    #execution_log_drawer {
+        height: 1fr;
+        width: 100%;
+        border: round $accent;
+        background: $panel;
+        padding: 1;
+    }
     """
 
     def __init__(self, **kwargs):
@@ -460,6 +577,7 @@ class DashboardApp(App):
         self.market_snapshots = {}
         self.index_snapshots = {}
         self.market_table_symbols = []
+        self.log_buffer = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -572,6 +690,122 @@ class DashboardApp(App):
         self.load_orders()
         self.load_news()
         self.set_interval(0.15, self.animate_ticker_marquee)
+        self.log_event(f"System Initialized in {mode_str} mode. Market state: {market_state}.", "info")
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        pane_id = getattr(event.pane, "id", "") or getattr(event.tab, "id", "")
+        if "news" in pane_id:
+            try:
+                self.query_one("#news_table", DataTable).focus()
+            except Exception:
+                pass
+        elif "markets" in pane_id:
+            try:
+                self.query_one("#markets_table", DataTable).focus()
+            except Exception:
+                pass
+        elif "portfolio" in pane_id:
+            try:
+                self.query_one("#portfolio_table", DataTable).focus()
+            except Exception:
+                pass
+        elif "orders" in pane_id:
+            try:
+                self.query_one("#orders_table", DataTable).focus()
+            except Exception:
+                pass
+
+    def log_event(self, msg: str, level: str = "info") -> None:
+        try:
+            from datetime import datetime
+            time_str = datetime.now().strftime("%H:%M:%S")
+            
+            if level == "error":
+                formatted = f"[{time_str}] [bold red]ERROR [/bold red]  {msg}"
+            elif level == "warning":
+                formatted = f"[{time_str}] [bold yellow]WARN  [/bold yellow]  {msg}"
+            elif level == "success":
+                formatted = f"[{time_str}] [bold green]EXEC  [/bold green]  {msg}"
+            else:
+                formatted = f"[{time_str}] [cyan]INFO  [/cyan]  {msg}"
+                
+            if hasattr(self, "log_buffer"):
+                self.log_buffer.append(formatted)
+                
+            try:
+                log_widget = self.screen.query_one("#modal_execution_log_drawer", Log)
+                log_widget.write_line(formatted)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def action_toggle_activity_log(self) -> None:
+        """Open Activity Log Modal Screen on Ctrl+L."""
+        self.push_screen(ActivityLogModal())
+
+    def action_quick_buy(self) -> None:
+        try:
+            tabbed = self.query_one(TabbedContent)
+            active_tab = tabbed.active
+            sym = None
+            if active_tab == "markets_tab":
+                table = self.query_one("#markets_table", DataTable)
+                if table.cursor_row < len(self.market_table_symbols):
+                    sym = self.market_table_symbols[table.cursor_row]
+            elif active_tab == "portfolio_tab":
+                table = self.query_one("#portfolio_table", DataTable)
+                if table.cursor_row < len(self.current_positions):
+                    sym = self.current_positions[table.cursor_row].symbol
+            elif self.symbols:
+                sym = self.symbols[0]
+                
+            if sym:
+                self.query_one("#trade_symbol", Input).value = sym
+                tabbed.active = "trade_tab"
+                self.notify(f"HotKey [Ctrl+B]: Trade ticket loaded with {sym}", severity="information")
+                self.log_event(f"HOTKEY [Ctrl+B]: Loaded order ticket for {sym}", "info")
+            else:
+                self.notify("No symbol selected for Quick Buy.", severity="warning")
+        except Exception as e:
+            self.notify(f"Quick Buy error: {e}", severity="error")
+
+    def action_liquidate_selected(self) -> None:
+        try:
+            tabbed = self.query_one(TabbedContent)
+            table = self.query_one("#portfolio_table", DataTable)
+            if table.cursor_row < len(self.current_positions):
+                pos = self.current_positions[table.cursor_row]
+                self.push_screen(PositionModal(pos))
+                self.log_event(f"HOTKEY [Ctrl+K]: Liquidation modal opened for {pos.symbol}", "warning")
+            else:
+                self.notify("No position selected in Portfolio tab.", severity="warning")
+        except Exception as e:
+            self.notify(f"Liquidate error: {e}", severity="error")
+
+    def action_refresh_all(self) -> None:
+        try:
+            self.load_portfolio()
+            self.load_markets()
+            self.load_orders()
+            self.load_news()
+            self.notify("HotKey [Ctrl+R]: Refreshed all workspace data.", severity="information")
+            self.log_event("HOTKEY [Ctrl+R]: All workspace data reloaded.", "info")
+        except Exception as e:
+            self.notify(f"Refresh error: {e}", severity="error")
+
+    def action_focus_search(self) -> None:
+        try:
+            tabbed = self.query_one(TabbedContent)
+            active_tab = tabbed.active
+            if active_tab == "markets_tab":
+                self.query_one("#new_symbol_input", Input).focus()
+            elif active_tab == "news_tab":
+                self.query_one("#news_symbol_input", Input).focus()
+            elif active_tab == "trade_tab":
+                self.query_one("#trade_symbol", Input).focus()
+        except Exception:
+            pass
 
     def load_portfolio(self):
         try:
@@ -740,11 +974,40 @@ class DashboardApp(App):
             # Fetch User Watchlist Snapshots for Bottom Table
             snapshots = {}
             if self.symbols:
-                try:
-                    req = StockSnapshotRequest(symbol_or_symbols=self.symbols)
-                    snapshots = client.get_stock_snapshot(req)
-                except Exception:
-                    pass
+                stock_syms = [s for s in self.symbols if "/" not in s]
+                crypto_syms = [s for s in self.symbols if "/" in s]
+                
+                if stock_syms:
+                    try:
+                        req = StockSnapshotRequest(symbol_or_symbols=stock_syms)
+                        stock_snaps = client.get_stock_snapshot(req)
+                        if isinstance(stock_snaps, dict):
+                            snapshots.update(stock_snaps)
+                    except Exception:
+                        for s in stock_syms:
+                            try:
+                                single_snap = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=[s]))
+                                if isinstance(single_snap, dict) and s in single_snap:
+                                    snapshots[s] = single_snap[s]
+                            except Exception:
+                                pass
+                                
+                if crypto_syms:
+                    try:
+                        crypto_client = get_crypto_data_client()
+                        c_req = CryptoSnapshotRequest(symbol_or_symbols=crypto_syms)
+                        crypto_snaps = crypto_client.get_crypto_snapshot(c_req)
+                        if isinstance(crypto_snaps, dict):
+                            snapshots.update(crypto_snaps)
+                    except Exception:
+                        for s in crypto_syms:
+                            try:
+                                crypto_client = get_crypto_data_client()
+                                single_snap = crypto_client.get_crypto_snapshot(CryptoSnapshotRequest(symbol_or_symbols=[s]))
+                                if isinstance(single_snap, dict) and s in single_snap:
+                                    snapshots[s] = single_snap[s]
+                            except Exception:
+                                pass
                 
             self.market_snapshots = {}
             for sym in self.symbols:
@@ -768,10 +1031,25 @@ class DashboardApp(App):
 
             # Populate markets_table
             self.market_table_symbols = [s for s in self.symbols if s in self.market_snapshots]
+            table.clear(columns=True)
+            table.add_columns(
+                "Symbol", 
+                Text("Price", justify="right"),
+                Text("Change ($)", justify="right"),
+                Text("Change (%)", justify="right"),
+                Text("Day High", justify="right"),
+                Text("Day Low", justify="right"),
+                Text("Prev Close", justify="right"),
+                Text("Intraday Trend", justify="center")
+            )
             for sym in self.market_table_symbols:
                 d = self.market_snapshots[sym]
                 c_color = "green" if d["chg"] >= 0 else "red"
                 sign = "+" if d["chg"] >= 0 else ""
+                
+                # Generate 8-level sparkline trajectory
+                spark_series = [d["prev_close"], d["low"], (d["high"]+d["low"])/2, d["price"], d["high"]]
+                spark_str = generate_sparkline(spark_series)
                 
                 table.add_row(
                     sym,
@@ -781,6 +1059,7 @@ class DashboardApp(App):
                     Text(f"${d['high']:.2f}", justify="right"),
                     Text(f"${d['low']:.2f}", justify="right"),
                     Text(f"${d['prev_close']:.2f}", justify="right"),
+                    Text(spark_str, style="bold green" if d["chg"] >= 0 else "bold red", justify="center"),
                     key=sym,
                 )
         except Exception as e:
@@ -796,9 +1075,10 @@ class DashboardApp(App):
             self.call_from_thread(self.update_market_widget, t.symbol, float(t.price))
 
         benchmarks = ["SPY", "QQQ", "DIA", "IWM", "VIX"]
-        stream_syms = list(set(self.symbols + benchmarks))
-        self.streamer = MarketStreamer(stream_syms, on_trade=on_trade)
-        self.streamer.start()
+        stock_stream_syms = [s for s in list(set(self.symbols + benchmarks)) if "/" not in s]
+        if stock_stream_syms:
+            self.streamer = MarketStreamer(stock_stream_syms, on_trade=on_trade)
+            self.streamer.start()
         
         if not self.news_streamer:
             async def on_news(n):
@@ -1009,6 +1289,13 @@ class DashboardApp(App):
             self.load_news()
             self.notify("Cleared news filter", severity="information")
 
+        elif event.button.id == "clear_log_btn":
+            try:
+                self.query_one("#execution_log_drawer", Log).clear()
+                self.notify("Activity log cleared", severity="information")
+            except Exception:
+                pass
+
         elif event.button.id == "refresh_portfolio_btn":
             self.load_portfolio()
             self.notify("Refreshed portfolio details", severity="information")
@@ -1196,8 +1483,12 @@ class DashboardApp(App):
     async def action_add_symbol(self, sym: str) -> None:
         if sym and sym not in self.symbols:
             try:
-                client = get_stock_data_client()
-                snap = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=[sym]))
+                if "/" in sym:
+                    crypto_client = get_crypto_data_client()
+                    snap = crypto_client.get_crypto_snapshot(CryptoSnapshotRequest(symbol_or_symbols=[sym]))
+                else:
+                    client = get_stock_data_client()
+                    snap = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=[sym]))
                 if sym not in snap or not snap[sym].latest_trade:
                     raise ValueError("No trade data found")
             except Exception:
@@ -1208,6 +1499,7 @@ class DashboardApp(App):
             config.add_to_watchlist(sym)
             self.load_markets()
             self.notify(f"Added {sym} to watchlist.", severity="information")
+            self.log_event(f"Added {sym} to market watchlist.", "info")
 
     async def action_remove_symbol(self, sym: str) -> None:
         if sym in self.symbols:

@@ -32,12 +32,12 @@ graph TD
 ## Textual TUI Workstation (`src/alpaca_cli/cli/tui/`)
 
 ### Architecture & Components
-- **`app.py`**: `DashboardApp(App)` managing event loops, state, modals, and tab navigation.
+- **`app.py`**: `DashboardApp(App)` managing event loops, state, modals, hotkey bindings, and 5-tab workstation navigation.
 - **`stream.py`**: `MarketStreamer` (`StockDataStream`) and `NewsStreamer` (`NewsDataStream`) running background WebSocket threads. Safely communicates ticks to UI via `app.call_from_thread()`.
 
-### 5 Workstation Tabs
+### 5 Main Workstation Tabs
 1. **Portfolio Tab**: 2x3 summary card grid (`Equity`, `Buying Power`, `Cash`, `Day P&L`, `Margin Maintenance`, `PDT Status`), 2-column split layout containing `Open Positions Table` (blue `[LONG]` / magenta `[SHORT]` badges) and `Asset Allocation Progress Bar Chart`.
-2. **Markets Tab (Watchlist)**: Top Bloomberg horizontal marquee ticker tape (`SPY`, `QQQ`, `DIA`, `IWM`, `VIX`), 7-column data-dense `#markets_table`, live tick cell updates via `table.update_cell()`, sector preset buttons (`+ Tech`, `+ Indices`, `+ Crypto`).
+2. **Markets Tab (Watchlist)**: Top Bloomberg horizontal marquee ticker tape (`SPY`, `QQQ`, `DIA`, `IWM`, `VIX`), 7-column data-dense `#markets_table` with **ASCII intraday sparklines (`▂▃▄▅▆▇█`)**, live tick cell updates via `table.update_cell()`, sector preset buttons (`+ Tech`, `+ Indices`, `+ Crypto`).
 3. **Trade Tab**: Advanced 2-column order ticket supporting Market/Limit, Notional/Qty, TIF, and Price ($) / Percent (%) Take Profit & Stop Loss brackets with market snapshot price auto-fill.
 4. **Orders Tab**: `#orders_table` listing open/active orders with 1-click `Cancel All Open Orders` action.
 5. **Market News Tab**: Real-time breaking news feed, symbol search filter (`NVDA`, `AAPL`) with `Enter` key support, and `NewsReaderModal` for reading full un-truncated articles with a 1-click **"Trade Ticker"** action.
@@ -47,6 +47,14 @@ graph TD
 - **`OrderInfoModal`**: Displays order details, TIF, limit prices, and 1-click order cancellation.
 - **`AssetInfoModal`**: Displays Alpaca asset properties (tradable, shortable, marginable, easy to borrow) and 1-click watchlist removal.
 - **`NewsReaderModal`**: Renders full article headline, author, source badge, publish date, un-truncated summary text, and 1-click ticket pre-fill into Trade tab.
+- **`ActivityLogModal`**: Full-screen live execution drawer (triggered via `Ctrl+L`) logging timestamped order fills, cancellations, position liquidations, and WebSocket tick events with a 1-click **"Clear Log"** button.
+
+### Speed Trading Hotkeys & Keybindings
+- `Ctrl+B`: **Quick Buy** — Pre-fills the Trade tab order ticket with the highlighted symbol in Markets or Portfolio, then switches tabs instantly.
+- `Ctrl+K`: **Quick Liquidate** — Opens liquidation modal for the highlighted position row in Portfolio tab.
+- `Ctrl+R`: **Refresh All** — Reloads all account data, market quotes, active orders, and breaking news feeds across all tabs.
+- `Ctrl+L`: **Activity Log Modal** — Pops up the hidden full-screen system event & order execution log drawer from anywhere in the app.
+- `/` (Slash): **Search Focus** — Focuses the symbol input field on Markets tab or filter field on News tab.
 
 ## Configuration & Credentials
 The application utilizes a cascading configuration priority:
