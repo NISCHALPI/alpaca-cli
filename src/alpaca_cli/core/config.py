@@ -162,5 +162,25 @@ class Config:
             )
             raise ValueError(plain_error)
 
+    @property
+    def watchlist(self) -> list[str]:
+        """Get the saved watchlist symbols."""
+        return list(self._state.get("watchlist", ["SPY", "QQQ", "DIA", "IWM"]))
+        
+    def add_to_watchlist(self, symbol: str) -> None:
+        """Add a symbol to the saved watchlist."""
+        symbols = self.watchlist
+        if symbol not in symbols:
+            symbols.append(symbol)
+            self._state["watchlist"] = symbols
+            self._save_state()
+
+    def remove_from_watchlist(self, symbol: str) -> None:
+        """Remove a symbol from the saved watchlist."""
+        symbols = self.watchlist
+        if symbol in symbols:
+            symbols.remove(symbol)
+            self._state["watchlist"] = symbols
+            self._save_state()
 
 config = Config()

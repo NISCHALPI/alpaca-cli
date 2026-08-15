@@ -2,7 +2,7 @@
 
 ## Project Overview
 - **What this project is**: A command-line interface tool for the Alpaca Markets API.
-- **Tech stack**: Python 3.14+, `alpaca-py` >= 0.43.2, `rich-click`, `Rich`.
+- **Tech stack**: Python 3.14+, `alpaca-py` >= 0.43.2, `rich-click`, `Rich`, `Textual` >= 1.0.0.
 - **Entry point**: `alpaca-cli` → `alpaca_cli.cli.main:cli`
 
 ## Architecture
@@ -10,17 +10,43 @@
 ```mermaid
 graph TD
     User((User)) -->|Commands & Args| CLI[CLI Layer<br/>src/alpaca_cli/cli]
+    User -->|Dashboard TUI| TUI[Textual TUI Layer<br/>src/alpaca_cli/cli/tui]
     CLI -->|Core Utilities| Core[Core Layer<br/>src/alpaca_cli/core]
     CLI -->|Delegates Work| Services[Services Layer<br/>src/alpaca_cli/services]
+    TUI -->|Delegates Work| Services
+    TUI -->|Live Streams| Streamers[WebSocket Streamers<br/>src/alpaca_cli/cli/tui/stream.py]
     Services -->|Request Objects| API[API Layer<br/>src/alpaca_cli/api]
-    API -->|REST/WebSockets| AlpacaAPI[Alpaca Markets API]
+    Streamers -->|WebSockets| AlpacaAPI[Alpaca Markets API]
+    API -->|REST API| AlpacaAPI
 ```
 
 ### Module Responsibilities
 - **`api/`**: Manages direct connections to Alpaca API through client singletons (`client.py`).
-- **`services/`**: Contains pure Python business logic, financial math, and order builders independent of the CLI (e.g., `portfolio.py`, `orders.py`).
+- **`services/`**: Contains pure Python business logic, financial math, and order builders independent of the CLI presentation layer (e.g., `portfolio.py`, `orders.py`).
 - **`core/`**: Handles foundational logic including application configurations, credentials (`config.py`), constants (`constants.py`), and custom logging (`logger.py`).
-- **`cli/`**: The presentation layer. Contains the main entry point (`main.py`), UI formatting logic (`formatters.py`), theming (`theme.py`), and all click commands organized cleanly inside `cli/commands/` (e.g., `trading`, `data`, `portfolio`).
+- **`cli/`**: The presentation layer.
+  - **`commands/`**: Organized Click command groups (`trading/`, `data/`, `portfolio.py`, `config.py`, `dashboard.py`).
+  - **`tui/`**: Textual terminal workstation dashboard (`app.py`, `stream.py`).
+  - **`formatters.py` & `theme.py`**: Rich console tables and color palettes.
+
+## Textual TUI Workstation (`src/alpaca_cli/cli/tui/`)
+
+### Architecture & Components
+- **`app.py`**: `DashboardApp(App)` managing event loops, state, modals, and tab navigation.
+- **`stream.py`**: `MarketStreamer` (`StockDataStream`) and `NewsStreamer` (`NewsDataStream`) running background WebSocket threads. Safely communicates ticks to UI via `app.call_from_thread()`.
+
+### 5 Workstation Tabs
+1. **Portfolio Tab**: 2x3 summary card grid (`Equity`, `Buying Power`, `Cash`, `Day P&L`, `Margin Maintenance`, `PDT Status`), 2-column split layout containing `Open Positions Table` (blue `[LONG]` / magenta `[SHORT]` badges) and `Asset Allocation Progress Bar Chart`.
+2. **Markets Tab (Watchlist)**: Top Bloomberg horizontal marquee ticker tape (`SPY`, `QQQ`, `DIA`, `IWM`, `VIX`), 7-column data-dense `#markets_table`, live tick cell updates via `table.update_cell()`, sector preset buttons (`+ Tech`, `+ Indices`, `+ Crypto`).
+3. **Trade Tab**: Advanced 2-column order ticket supporting Market/Limit, Notional/Qty, TIF, and Price ($) / Percent (%) Take Profit & Stop Loss brackets with market snapshot price auto-fill.
+4. **Orders Tab**: `#orders_table` listing open/active orders with 1-click `Cancel All Open Orders` action.
+5. **Market News Tab**: Real-time breaking news feed, symbol search filter (`NVDA`, `AAPL`) with `Enter` key support, and `NewsReaderModal` for reading full un-truncated articles with a 1-click **"Trade Ticker"** action.
+
+### Interactive Modal Screens
+- **`PositionModal`**: Summary view of cost basis, unrealized PnL, and 1-click position liquidation (`client.close_position`).
+- **`OrderInfoModal`**: Displays order details, TIF, limit prices, and 1-click order cancellation.
+- **`AssetInfoModal`**: Displays Alpaca asset properties (tradable, shortable, marginable, easy to borrow) and 1-click watchlist removal.
+- **`NewsReaderModal`**: Renders full article headline, author, source badge, publish date, un-truncated summary text, and 1-click ticket pre-fill into Trade tab.
 
 ## Configuration & Credentials
 The application utilizes a cascading configuration priority:
@@ -86,6 +112,9 @@ The following guards have been integrated into the system to circumvent known ed
 5. **Decimal Arithmetic**: Strictly adopted for financial calculus to nullify floating point imprecision.
 6. **Dust Thresholds**: Filters out negligible delta values to mitigate excessive, immaterial api calls.
 7. **Fractional Share Restrictions**: Hardened validation ensuring fractional logic is bound exclusively to valid TIF parameters.
+8. **Pydantic NewsRequest Symbols String Validation**: Ensures `symbols` parameter is passed as a string (e.g. `"NVDA"`) rather than a Python list `["NVDA"]` to prevent `ValidationError` crashes.
+9. **Rich Text Marquee Slicing**: Slices Rich `Text` spans directly (`full_text[offset:] + full_text[:offset]`) to preserve markup formatting across 150ms marquee shift frames.
+10. **Order Ticket Snapshot Price Fallback**: Checks `latest_trade.price` first, falling back to `previous_daily_bar.close` if live ticks are missing outside market hours.
 
 ## Testing
 - **Test Structure**: Resides entirely within the `tests/unit/` directory.
@@ -100,6 +129,7 @@ The following guards have been integrated into the system to circumvent known ed
 
 | Command | Description |
 |---------|-------------|
+| `alpaca-cli dashboard` | Launch Textual Terminal Workstation |
 | `alpaca-cli trading account status` | Account overview |
 | `alpaca-cli trading orders buy market AAPL 10` | Market buy |
 | `alpaca-cli buy AAPL 10` | Quick buy alias |

@@ -11,6 +11,24 @@ from alpaca_cli.core.logger import configure_logging
 # Use Rich markup for all help text
 click.rich_click.USE_RICH_MARKUP = True
 
+# Group commands logically in the help menu
+click.rich_click.COMMAND_GROUPS = {
+    "alpaca-cli": [
+        {
+            "name": "Core Operations",
+            "commands": ["trading", "data", "portfolio"],
+        },
+        {
+            "name": "Quick Aliases",
+            "commands": ["buy", "sell", "pos", "status", "quote", "clock"],
+        },
+        {
+            "name": "System & Configuration",
+            "commands": ["dashboard", "config"],
+        },
+    ]
+}
+
 # Configure logging at startup
 configure_logging()
 
@@ -41,7 +59,7 @@ def version_callback(ctx: click.Context, param: click.Parameter, value: bool) ->
     ctx.exit()
 
 
-@click.group()
+@click.group(name="alpaca-cli")
 @click.option("--debug", is_flag=True, help="Enable debug logging")
 @click.option(
     "--version",
