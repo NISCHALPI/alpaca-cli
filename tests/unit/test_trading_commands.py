@@ -7,6 +7,8 @@ from alpaca.trading.enums import (
     AccountStatus,
     OrderType,
     OrderStatus,
+    OrderSide,
+    TimeInForce,
 )
 
 
@@ -119,6 +121,7 @@ def test_orders_buy_market(runner):
             "alpaca_cli.cli.groups.trading.orders.get_trading_client"
         ) as mock_get_client,
         patch("alpaca_cli.cli.groups.trading.orders.logger") as mock_logger,
+        patch("alpaca_cli.cli.groups.trading.orders.print_table") as mock_print_table,
     ):
 
         mock_client = MagicMock()
@@ -128,6 +131,14 @@ def test_orders_buy_market(runner):
         mock_order = MagicMock(spec=Order)
         mock_order.id = "test-order-id"
         mock_order.status = OrderStatus.NEW
+        mock_order.symbol = "AAPL"
+        mock_order.side = OrderSide.BUY
+        mock_order.qty = 10.0
+        mock_order.notional = None
+        mock_order.limit_price = None
+        mock_order.stop_price = None
+        mock_order.time_in_force = TimeInForce.DAY
+        mock_order.type = OrderType.MARKET
 
         mock_client.submit_order.return_value = mock_order
 
@@ -137,9 +148,10 @@ def test_orders_buy_market(runner):
 
         assert result.exit_code == 0
 
-        # Verify logger was called with success message
-        # logger.info(f"Order submitted successfully: {order.id}")
-        mock_logger.info.assert_any_call("Order submitted successfully: test-order-id")
+        # Verify print_table was called with order summary
+        mock_print_table.assert_called_once()
+        call_args = mock_print_table.call_args
+        assert "Order Submitted" in call_args[0][0]
 
         # Verify call args
         mock_client.submit_order.assert_called_once()

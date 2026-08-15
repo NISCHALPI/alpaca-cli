@@ -164,7 +164,7 @@ def calculate_rebalancing_orders(
     allow_short: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Calculate orders to rebalance portfolio with STRICT data validation.
+    Calculate notional-based orders to rebalance portfolio with STRICT data validation.
 
     Args:
         current_equity: Current equity value
@@ -172,6 +172,9 @@ def calculate_rebalancing_orders(
         target_weights: Target weights as a dictionary of symbol to weight
         current_prices: Current prices as a dictionary of symbol to price
         allow_short: Whether to allow short selling
+
+    Returns:
+        List of notional-based order dictionaries.
 
     Raises:
         ValueError: If ANY input data (Equity, Qty, Weight, Price) is NaN.
@@ -222,17 +225,19 @@ def calculate_rebalancing_orders(
         try:
             qty_d = Decimal(str(raw_qty))
             weight_d = Decimal(str(raw_weight))
-            price_d = Decimal(str(raw_price))
-
-            if price_d < 0:
-                raise ValueError(f"Price for {symbol} cannot be negative: {price_d}")
-
         except InvalidOperation:
             raise ValueError(f"Non-numeric data found for {symbol}")
 
         # Skip irrelevant symbols (No position, No target)
         if qty_d == 0 and weight_d == 0:
             continue
+
+        try:
+            price_d = Decimal(str(raw_price))
+            if price_d < 0:
+                raise ValueError(f"Price for {symbol} cannot be negative: {price_d}")
+        except InvalidOperation:
+            raise ValueError(f"Non-numeric price data found for {symbol}")
 
         # Prevent Division by Zero if Price is 0 (even if not NaN)
         if price_d == 0:
@@ -245,18 +250,18 @@ def calculate_rebalancing_orders(
             # Strict mode: Raise Error.
             raise ValueError(f"Price for {symbol} is 0. Aborting rebalance.")
 
-        # Logic: Calculate Target Quantity
+        # Logic: Calculate Target Value
         target_value_d = equity_d * weight_d
-        target_qty_d = target_value_d / price_d
+        current_value_d = qty_d * price_d
 
-        diff_qty_d = target_qty_d - qty_d
+        diff_value_d = target_value_d - current_value_d
 
         # 4. Short Selling Safety Check
-        final_qty_d = qty_d + diff_qty_d
-        if final_qty_d < 0 and not allow_short:
-            # Allow for microscopic precision errors (e.g. -0.000000001) -> Snap to 0
-            if abs(final_qty_d) < MIN_QTY_THRESHOLD:
-                diff_qty_d = -qty_d  # Close exactly
+        final_value_d = current_value_d + diff_value_d
+        if final_value_d < 0 and not allow_short:
+            # Allow for microscopic precision errors -> Snap to 0
+            if abs(final_value_d) < Decimal(str(MIN_TRADE_VALUE_THRESHOLD)):
+                diff_value_d = -current_value_d  # Close exactly
             else:
                 # If the math implies a true short position, we raise an error in strict mode
                 # rather than silently skipping.
@@ -265,22 +270,18 @@ def calculate_rebalancing_orders(
                 )
 
         # 5. Dust Thresholds
-        if abs(diff_qty_d) < MIN_QTY_THRESHOLD:
-            continue
-
-        trade_value = abs(diff_qty_d) * price_d
-        if trade_value < MIN_TRADE_VALUE_THRESHOLD:
+        if abs(diff_value_d) < Decimal(str(MIN_TRADE_VALUE_THRESHOLD)):
             # Check if this is a full liquidation. If so, ignore threshold and clean up dust.
             is_liquidation = weight_d == 0
             if not is_liquidation:
                 continue
 
-        side = "buy" if diff_qty_d > 0 else "sell"
+        side = "buy" if diff_value_d > 0 else "sell"
 
         orders.append(
             {
                 "symbol": symbol,
-                "qty": float(abs(diff_qty_d)),
+                "notional": float(abs(diff_value_d)),
                 "side": side,
                 "type": "market",
             }

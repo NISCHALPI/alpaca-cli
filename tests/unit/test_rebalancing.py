@@ -47,7 +47,7 @@ class TestCalculateRebalancingOrders:
         assert isinstance(orders, list)
         for order in orders:
             assert "symbol" in order
-            assert "qty" in order
+            assert "notional" in order
             assert "side" in order
             assert "type" in order
 
@@ -208,17 +208,17 @@ class TestMinimalOrderCalculation:
         aapl_orders = [o for o in orders if o["symbol"] == "AAPL"]
         assert len(aapl_orders) == 0, "AAPL is at target, should have no orders"
 
-        # MSFT should have SELL order (30% -> 20% = sell 10 shares)
+        # MSFT should have SELL order (30% -> 20% = sell $1000 notional)
         msft_orders = [o for o in orders if o["symbol"] == "MSFT"]
         assert len(msft_orders) == 1
         assert msft_orders[0]["side"] == "sell"
-        assert abs(msft_orders[0]["qty"] - 10) < 0.01  # Sell 10 shares
+        assert abs(msft_orders[0]["notional"] - 1000) < 1  # Sell $1000
 
-        # GOOGL should have BUY order (0% -> 20% = buy 20 shares)
+        # GOOGL should have BUY order (0% -> 20% = buy $2000 notional)
         googl_orders = [o for o in orders if o["symbol"] == "GOOGL"]
         assert len(googl_orders) == 1
         assert googl_orders[0]["side"] == "buy"
-        assert abs(googl_orders[0]["qty"] - 20) < 0.01  # Buy 20 shares
+        assert abs(googl_orders[0]["notional"] - 2000) < 1  # Buy $2000
 
     def test_correct_quantity_calculation(self):
         """Verify exact quantity calculations for rebalancing."""
@@ -236,9 +236,9 @@ class TestMinimalOrderCalculation:
         assert len(orders) == 1
         assert orders[0]["symbol"] == "AAPL"
         assert orders[0]["side"] == "buy"
-        # Expected: ($50000 * 0.4) / $150 - 100 = 133.33 - 100 = 33.33
-        expected_qty = (50000 * 0.4) / 150 - 100
-        assert abs(orders[0]["qty"] - expected_qty) < 0.01
+        # Expected notional: ($50000 * 0.4) - (100 * $150) = $20000 - $15000 = $5000
+        expected_notional = (50000 * 0.4) - (100 * 150)
+        assert abs(orders[0]["notional"] - expected_notional) < 1
 
     def test_mixed_buy_sell_orders(self):
         """Test a scenario requiring both buy and sell orders."""
@@ -259,10 +259,10 @@ class TestMinimalOrderCalculation:
         msft_order = next(o for o in orders if o["symbol"] == "MSFT")
 
         assert aapl_order["side"] == "buy"
-        assert abs(aapl_order["qty"] - 20) < 0.01
+        assert abs(aapl_order["notional"] - 2000) < 1  # Buy $2000
 
         assert msft_order["side"] == "sell"
-        assert abs(msft_order["qty"] - 20) < 0.01
+        assert abs(msft_order["notional"] - 2000) < 1  # Sell $2000
 
     def test_accounts_for_existing_positions_not_in_target(self):
         """Positions not in target should be liquidated."""
@@ -280,7 +280,7 @@ class TestMinimalOrderCalculation:
         googl_orders = [o for o in orders if o["symbol"] == "GOOGL"]
         assert len(googl_orders) == 1
         assert googl_orders[0]["side"] == "sell"
-        assert abs(googl_orders[0]["qty"] - 10) < 0.01
+        assert abs(googl_orders[0]["notional"] - 1000) < 1  # 10 shares * $100 = $1000
 
     def test_large_portfolio_minimal_orders(self):
         """Test with a larger portfolio - only deviant positions should trade."""
@@ -317,11 +317,11 @@ class TestMinimalOrderCalculation:
 
         googl_order = next(o for o in orders if o["symbol"] == "GOOGL")
         assert googl_order["side"] == "sell"
-        assert abs(googl_order["qty"] - 50) < 0.01
+        assert abs(googl_order["notional"] - 5000) < 1  # 50 shares * $100 = $5000
 
         amzn_order = next(o for o in orders if o["symbol"] == "AMZN")
         assert amzn_order["side"] == "buy"
-        assert abs(amzn_order["qty"] - 50) < 0.01
+        assert abs(amzn_order["notional"] - 5000) < 1  # 50 shares * $100 = $5000
 
     def test_fractional_shares_precision(self):
         """Test that fractional share quantities are calculated correctly."""
@@ -336,8 +336,9 @@ class TestMinimalOrderCalculation:
         )
 
         assert len(orders) == 1
-        expected_qty = (10000 * 0.3333) / 175
-        assert abs(orders[0]["qty"] - expected_qty) < 0.001
+        # Expected notional: $10000 * 0.3333 = $3333
+        expected_notional = 10000 * 0.3333
+        assert abs(orders[0]["notional"] - expected_notional) < 1
 
     def test_sell_before_buy_ordering_in_output(self):
         """The function returns raw orders - verify both buy and sell present."""

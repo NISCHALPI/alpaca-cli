@@ -49,12 +49,15 @@ def _build_bracket_params(
 ) -> dict:
     """Build bracket order parameters (take profit and stop loss)."""
     params = {}
-    if take_profit:
+    if take_profit is not None:
         params["take_profit"] = TakeProfitRequest(limit_price=take_profit)
-    if stop_loss:
+    if stop_loss is not None:
         params["stop_loss"] = StopLossRequest(
             stop_price=stop_loss, limit_price=stop_loss_limit
         )
+    # Set order_class when bracket params are present
+    if params:
+        params["order_class"] = OrderClass.BRACKET
     return params
 
 
@@ -119,7 +122,7 @@ def create_stop_order(
     client_order_id: Optional[str] = None,
 ) -> Union[StopOrderRequest, StopLimitOrderRequest]:
     """Create a StopOrderRequest or StopLimitOrderRequest."""
-    if limit_price:
+    if limit_price is not None:
         return StopLimitOrderRequest(
             symbol=symbol.upper(),
             qty=qty,
@@ -177,8 +180,8 @@ def submit_order(
         StopLimitOrderRequest,
         TrailingStopOrderRequest,
     ],
-) -> None:
-    """Submit an order request to the trading client."""
+):
+    """Submit an order request to the trading client and return the submitted order."""
     client = get_trading_client()
     try:
         order_type = order_request.__class__.__name__.replace(
@@ -197,10 +200,39 @@ def submit_order(
             f"Submitting {order_type} {order_request.side.name} order for {amount_str} {order_request.symbol}..."
         )
         order = client.submit_order(order_data=order_request)
-        logger.info(f"Order submitted successfully: {order.id}")
-        logger.info(f"Status: {order.status}")
+
+        # Rich CLI summary table
+        summary_rows = [
+            ["Symbol", order.symbol],
+            ["Side", order.side.name],
+            ["Type", order.type.name if hasattr(order.type, "name") else str(order.type)],
+        ]
+        if order.qty:
+            summary_rows.append(["Qty", str(order.qty)])
+        if hasattr(order, "notional") and order.notional:
+            summary_rows.append(["Notional", format_currency(order.notional)])
+        if order.limit_price:
+            summary_rows.append(["Limit Price", format_currency(order.limit_price)])
+        if order.stop_price:
+            summary_rows.append(["Stop Price", format_currency(order.stop_price)])
+        if hasattr(order, "trail_price") and order.trail_price:
+            summary_rows.append(["Trail Price", format_currency(order.trail_price)])
+        if hasattr(order, "trail_percent") and order.trail_percent:
+            summary_rows.append(["Trail %", f"{order.trail_percent}%"])
+        summary_rows.append(["Time in Force", order.time_in_force.name])
+        summary_rows.append(["Status", order.status.name])
+        summary_rows.append(["Order ID", str(order.id)])
+
+        print_table(
+            f"✓ Order Submitted: {order.side.name} {order.symbol}",
+            ["Field", "Value"],
+            summary_rows,
+        )
+
+        return order
     except Exception as e:
         logger.error(f"Failed to submit order: {e}")
+        return None
 
 
 def cancel_order(order_id: str) -> None:
@@ -217,9 +249,12 @@ def cancel_order(order_id: str) -> None:
 def cancel_all_orders() -> None:
     """Cancel all open orders."""
     client = get_trading_client()
-    logger.info("Cancelling ALL open orders...")
-    client.cancel_orders()
-    logger.info("Cancellation requested for all orders.")
+    try:
+        logger.info("Cancelling ALL open orders...")
+        client.cancel_orders()
+        logger.info("Cancellation requested for all orders.")
+    except Exception as e:
+        logger.error(f"Failed to cancel all orders: {e}")
 
 
 # Legacy alias for backward compatibility
@@ -795,7 +830,7 @@ def buy_trailing(
     client_order_id: Optional[str],
 ) -> None:
     """Place a TRAILING STOP buy order."""
-    if not trail_price and not trail_percent:
+    if trail_price is None and trail_percent is None:
         logger.error("Must specify --trail-price or --trail-percent")
         return
     req = create_trailing_stop_order(
@@ -1044,7 +1079,7 @@ def sell_trailing(
     client_order_id: Optional[str],
 ) -> None:
     """Place a TRAILING STOP sell order."""
-    if not trail_price and not trail_percent:
+    if trail_price is None and trail_percent is None:
         logger.error("Must specify --trail-price or --trail-percent")
         return
     req = create_trailing_stop_order(
@@ -1070,11 +1105,6 @@ def portfolio() -> None:
 @portfolio.command("rebalance")
 @click.argument("target_weights_path", type=click.Path(exists=True))
 @click.option(
-    "--allow-short",
-    is_flag=True,
-    help="[Optional] Allow short selling if needed for rebalancing",
-)
-@click.option(
     "--dry-run/--execute",
     default=True,
     help="[Optional] Simulate orders without executing. Default: --dry-run",
@@ -1085,16 +1115,16 @@ def portfolio() -> None:
     help="[Optional] Force execution even if market is closed",
 )
 @click.option(
-    "--order-type",
-    type=click.Choice(["market", "limit"]),
-    default="market",
-    help="[Optional] Order type for rebalancing. Choices: market, limit. Default: market",
-)
-@click.option(
     "--tif",
     type=click.Choice(["day", "gtc", "ioc", "fok"]),
     default="day",
     help="[Optional] Time in force. Choices: day, gtc, ioc, fok. Default: day",
+)
+@click.option(
+    "--timeout",
+    type=int,
+    default=60,
+    help="[Optional] Timeout in seconds to wait for sell orders. Default: 60",
 )
 @click.option(
     "--yes",
@@ -1102,23 +1132,31 @@ def portfolio() -> None:
     is_flag=True,
     help="[Optional] Skip confirmation prompt",
 )
+@click.option(
+    "--allow-short",
+    is_flag=True,
+    help="[Optional] Allow negative weights for short positions",
+)
 def rebalance(
     target_weights_path: str,
-    allow_short: bool,
     dry_run: bool,
     force: bool,
-    order_type: str,
     tif: str,
+    timeout: int,
     yes: bool,
+    allow_short: bool,
 ) -> None:
-    """Rebalance portfolio based on target weights JSON file.
+    """Rebalance portfolio using NOTIONAL market orders with sell-first execution.
+
+    This is the default rebalance command.
 
     TARGET_WEIGHTS_PATH: Path to JSON file with target weights, e.g. {"AAPL": 0.5, "CASH": 0.5}
+
+    Use --allow-short to permit negative weights for intentional short positions.
     """
 
-    logger.info(f"Rebalancing portfolio (Dry Run: {dry_run})...")
+    logger.info(f"Rebalancing portfolio with notional orders (Dry Run: {dry_run})...")
 
-    # Load weights
     try:
         with open(target_weights_path, "r") as f:
             target_weights = json.load(f)
@@ -1130,18 +1168,18 @@ def rebalance(
         logger.error("Invalid weights format. Must be a JSON dictionary.")
         return
 
-    # Validate weights before processing
     non_cash_weights = {k: v for k, v in target_weights.items() if k != "CASH"}
     non_cash_sum = sum(non_cash_weights.values())
 
-    # Check for negative weights
     for sym, weight in non_cash_weights.items():
-        if weight < 0:
-            logger.error(f"Invalid negative weight for {sym}: {weight}")
+        if weight < 0 and not allow_short:
+            logger.error(
+                f"Invalid negative weight for {sym}: {weight}. "
+                f"Use --allow-short to permit short positions."
+            )
             return
 
-    # Check if weights exceed 100%
-    if non_cash_sum > 1.0 + 1e-9:  # Small epsilon for floating point
+    if non_cash_sum > 1.0 + 1e-9:
         logger.error(
             f"Total weight ({non_cash_sum:.2%}) exceeds 100%. "
             f"Please adjust your weights. Current weights:"
@@ -1150,14 +1188,12 @@ def rebalance(
             logger.error(f"  {sym}: {weight:.2%}")
         return
 
-    # Auto-calculate CASH if not specified
     if "CASH" not in target_weights:
         target_weights["CASH"] = 1.0 - non_cash_sum
         logger.info(
             f"'CASH' not specified, calculated as: {target_weights['CASH']:.2%}"
         )
 
-    # Validate total equals 100%
     total_weight = sum(target_weights.values())
     if not (0.99 <= total_weight <= 1.01):
         logger.error(
@@ -1167,7 +1203,6 @@ def rebalance(
 
     client = get_trading_client()
 
-    # Check market status
     if not force and not dry_run:
         try:
             clock = client.get_clock()
@@ -1178,7 +1213,6 @@ def rebalance(
             logger.error(f"Failed to check market status: {e}")
             return
 
-    # Get account and positions
     try:
         account = client.get_account()
         positions = client.get_all_positions()
@@ -1188,8 +1222,8 @@ def rebalance(
 
     current_equity = float(account.equity)
     current_positions = {p.symbol: float(p.qty) for p in positions}
+    position_values = {p.symbol: float(p.market_value) for p in positions}
 
-    # Get all symbols
     all_symbols = set(target_weights.keys()) | set(current_positions.keys())
     all_symbols.discard("CASH")
 
@@ -1197,7 +1231,6 @@ def rebalance(
         logger.info("No assets to rebalance.")
         return
 
-    # Fetch prices
     crypto_symbols = [s for s in all_symbols if "/" in s]
     stock_symbols = [s for s in all_symbols if "/" not in s]
     current_prices = {}
@@ -1224,129 +1257,227 @@ def rebalance(
             logger.error(f"Failed to fetch crypto prices: {e}")
             return
 
-    # Check missing prices
     missing = [s for s in all_symbols if s not in current_prices]
     if missing:
         logger.error(f"Missing prices for: {missing}")
         return
 
-    # Calculate orders
-    try:
-        orders_to_place = calculate_rebalancing_orders(
-            current_equity=current_equity,
-            current_positions=current_positions,
-            target_weights=target_weights,
-            current_prices=current_prices,
-            allow_short=allow_short,
-        )
-    except ValueError as e:
-        logger.error(f"Rebalancing error: {e}")
-        return
+    logger.info("Portfolio Analysis (Calculations for Reference):")
 
-    if not orders_to_place:
-        logger.info("Portfolio is balanced. No orders needed.")
-        return
+    value_rows = []
+    calculated_orders = []
 
-    # Sort: SELLS first
-    sell_orders = [o for o in orders_to_place if o["side"] == "sell"]
-    buy_orders = [o for o in orders_to_place if o["side"] == "buy"]
-    sorted_orders = sell_orders + buy_orders
+    for symbol in sorted(all_symbols):
+        current_qty = current_positions.get(symbol, 0)
+        price = current_prices.get(symbol, 0)
+        current_value = position_values.get(symbol, current_qty * price)
+        current_weight = current_value / current_equity if current_equity > 0 else 0
 
-    # Dry run display
-    if dry_run:
-        logger.info("Dry Run Mode - Portfolio Analysis:")
+        target_weight = target_weights.get(symbol, 0)
+        target_value = target_weight * current_equity
+        diff_value = target_value - current_value
 
-        # Build market value breakdown table
-        value_rows = []
-        for symbol in sorted(all_symbols):
-            current_qty = current_positions.get(symbol, 0)
-            price = current_prices.get(symbol, 0)
-            current_value = current_qty * price
-            current_weight = current_value / current_equity if current_equity > 0 else 0
-
-            target_weight = target_weights.get(symbol, 0)
-            target_value = target_weight * current_equity
-
-            value_rows.append(
-                [
-                    symbol,
-                    f"{current_weight:.2%}",
-                    f"{target_weight:.2%}",
-                    format_currency(current_value),
-                    format_currency(target_value),
-                ]
-            )
-
-        # Add CASH row
-        cash_current_value = current_equity - sum(
-            current_positions.get(s, 0) * current_prices.get(s, 0) for s in all_symbols
-        )
-        cash_current_weight = (
-            cash_current_value / current_equity if current_equity > 0 else 0
-        )
-        cash_target_weight = target_weights.get("CASH", 0)
-        cash_target_value = cash_target_weight * current_equity
         value_rows.append(
             [
-                "CASH",
-                f"{cash_current_weight:.2%}",
-                f"{cash_target_weight:.2%}",
-                format_currency(cash_current_value),
-                format_currency(cash_target_value),
+                symbol,
+                f"{current_weight:.2%}",
+                f"{target_weight:.2%}",
+                format_currency(current_value),
+                format_currency(target_value),
+                format_currency(diff_value),
             ]
         )
 
-        print_table(
-            f"Market Value Breakdown (Equity: {format_currency(current_equity)})",
-            ["Symbol", "Current %", "Target %", "Current Value", "Target Value"],
-            value_rows,
-        )
+        if abs(diff_value) >= 1.0:
+            if diff_value < 0:
+                # Cap sell notional at current position value to prevent unintended shorts
+                current_value_abs = abs(current_value)
+                sell_notional = abs(diff_value)
+                if sell_notional > current_value_abs and not allow_short:
+                    logger.warning(
+                        f"[SHORT GUARD] {symbol}: Sell ${sell_notional:.2f} exceeds position value "
+                        f"${current_value_abs:.2f}. Capping at position value."
+                    )
+                    sell_notional = current_value_abs
+                if sell_notional >= 1.0:
+                    label = "[SHORT] " if sell_notional > current_value_abs else ""
+                    calculated_orders.append(
+                        {
+                            "symbol": symbol,
+                            "side": "sell",
+                            "notional": sell_notional,
+                            "current_qty": current_qty,
+                            "label": label,
+                        }
+                    )
+            else:
+                calculated_orders.append(
+                    {
+                        "symbol": symbol,
+                        "side": "buy",
+                        "notional": abs(diff_value),
+                        "label": "",
+                    }
+                )
 
-        logger.info("Orders to be placed:")
-        rows = [
-            [o["symbol"], o["side"].upper(), f"{o['qty']:.4f}", order_type.upper()]
-            for o in sorted_orders
+    cash_current_value = current_equity - sum(
+        position_values.get(s, current_positions.get(s, 0) * current_prices.get(s, 0))
+        for s in all_symbols
+    )
+    cash_current_weight = (
+        cash_current_value / current_equity if current_equity > 0 else 0
+    )
+    cash_target_weight = target_weights.get("CASH", 0)
+    cash_target_value = cash_target_weight * current_equity
+    cash_diff = cash_target_value - cash_current_value
+
+    value_rows.append(
+        [
+            "CASH",
+            f"{cash_current_weight:.2%}",
+            f"{cash_target_weight:.2%}",
+            format_currency(cash_current_value),
+            format_currency(cash_target_value),
+            format_currency(cash_diff),
         ]
-        print_table("Proposed Orders", ["Symbol", "Side", "Qty", "Type"], rows)
+    )
+
+    print_table(
+        f"Market Value Breakdown (Equity: {format_currency(current_equity)})",
+        ["Symbol", "Current %", "Target %", "Current Value", "Target Value", "Diff"],
+        value_rows,
+    )
+
+    sell_orders = [o for o in calculated_orders if o["side"] == "sell"]
+    buy_orders = [o for o in calculated_orders if o["side"] == "buy"]
+
+    if not sell_orders and not buy_orders:
+        logger.info("Portfolio is balanced. No orders needed.")
         return
 
-    # Confirmation
+    logger.info("Proposed Notional Orders:")
+    order_rows = []
+    for o in sell_orders + buy_orders:
+        label = o.get("label", "")
+        order_rows.append(
+            [
+                f"{label}{o['symbol']}",
+                o["side"].upper(),
+                format_currency(o["notional"]),
+                "MARKET (notional)",
+            ]
+        )
+    print_table("Proposed Orders", ["Symbol", "Side", "Notional", "Type"], order_rows)
+
+    if dry_run:
+        logger.info("Dry run complete. Use --execute to place orders.")
+        return
+
     if not yes:
-        rows = [
-            [o["symbol"], o["side"].upper(), f"{o['qty']:.4f}", order_type.upper()]
-            for o in sorted_orders
-        ]
-        print_table("Orders to Execute", ["Symbol", "Side", "Qty", "Type"], rows)
-        if not click.confirm("Proceed with execution?"):
+        if not click.confirm("Proceed with execution? (Sells first, then Buys)"):
             logger.info("Cancelled.")
             return
 
-    # Execute orders using the unified order builders
-    for o in sorted_orders:
-        try:
-            side = OrderSide.BUY if o["side"] == "buy" else OrderSide.SELL
-            if order_type == "market":
+    execution_summary = []
+
+    if sell_orders:
+        logger.info(
+            f"Phase 1/2: Executing SELL orders ({len(sell_orders)} order(s))..."
+        )
+        sell_order_ids = []
+
+        for i, o in enumerate(sell_orders, 1):
+            label = o.get("label", "")
+            try:
                 req = create_market_order(
                     symbol=o["symbol"],
-                    side=side,
-                    qty=o["qty"],
+                    side=OrderSide.SELL,
+                    notional=round(o["notional"], 2),
                     tif=tif,
                 )
-            else:
-                price = current_prices.get(o["symbol"])
-                req = create_limit_order(
+                result = submit_order(req)
+                if result:
+                    sell_order_ids.append(result.id)
+                    logger.info(
+                        f"  ├── {label}{o['symbol']}: SELL {format_currency(o['notional'])} "
+                        f"(order {i}/{len(sell_orders)}) → submitted"
+                    )
+                    execution_summary.append(
+                        [f"{label}{o['symbol']}", "SELL", format_currency(o["notional"]), "SUBMITTED"]
+                    )
+                else:
+                    logger.error(f"  ├── {label}{o['symbol']}: SELL failed (no order returned)")
+                    execution_summary.append(
+                        [f"{label}{o['symbol']}", "SELL", format_currency(o["notional"]), "FAILED"]
+                    )
+            except Exception as e:
+                logger.error(f"  ├── {label}{o['symbol']}: SELL failed: {e}")
+                execution_summary.append(
+                    [f"{label}{o['symbol']}", "SELL", format_currency(o["notional"]), "ERROR"]
+                )
+
+        logger.info("  Waiting for sell orders to fill...")
+        all_sells_filled = True
+        for idx, order_id in enumerate(sell_order_ids):
+            filled = _wait_for_order_completion(
+                client, order_id, timeout_seconds=timeout
+            )
+            status = "✓ FILLED" if filled else "✗ INCOMPLETE"
+            logger.info(f"  ├── Order {str(order_id)[:8]}...: {status}")
+            if not filled:
+                all_sells_filled = False
+
+        if not all_sells_filled:
+            logger.warning(
+                "  └── Not all sell orders completed. Proceeding with buy orders anyway."
+            )
+        else:
+            logger.info("  └── All sell orders filled successfully.")
+
+    if buy_orders:
+        logger.info(
+            f"Phase 2/2: Executing BUY orders ({len(buy_orders)} order(s))..."
+        )
+        for i, o in enumerate(buy_orders, 1):
+            try:
+                req = create_market_order(
                     symbol=o["symbol"],
-                    side=side,
-                    qty=o["qty"],
-                    limit_price=price,
+                    side=OrderSide.BUY,
+                    notional=round(o["notional"], 2),
                     tif=tif,
                 )
-            submit_order(req)
-        except Exception as e:
-            logger.error(f"Failed to submit order for {o['symbol']}: {e}")
+                result = submit_order(req)
+                if result:
+                    logger.info(
+                        f"  ├── {o['symbol']}: BUY {format_currency(o['notional'])} "
+                        f"(order {i}/{len(buy_orders)}) → submitted"
+                    )
+                    execution_summary.append(
+                        [o["symbol"], "BUY", format_currency(o["notional"]), "SUBMITTED"]
+                    )
+                else:
+                    logger.error(f"  ├── {o['symbol']}: BUY failed (no order returned)")
+                    execution_summary.append(
+                        [o["symbol"], "BUY", format_currency(o["notional"]), "FAILED"]
+                    )
+            except Exception as e:
+                logger.error(f"  ├── {o['symbol']}: BUY failed: {e}")
+                execution_summary.append(
+                    [o["symbol"], "BUY", format_currency(o["notional"]), "ERROR"]
+                )
+
+    # Final execution summary
+    if execution_summary:
+        print_table(
+            "Execution Summary",
+            ["Symbol", "Side", "Notional", "Status"],
+            execution_summary,
+        )
+
+    logger.info("Rebalancing complete.")
 
 
-# --- REBALANCE NOTIONAL ---
+# --- ORDER WAITING HELPERS ---
 def _wait_for_order_completion(
     client,
     order_id: str,
@@ -1384,347 +1515,6 @@ def _wait_for_order_completion(
 
     logger.error(f"Order {order_id} timed out after {timeout_seconds}s")
     return False
-
-
-@portfolio.command("rebalance-notional")
-@click.argument("target_weights_path", type=click.Path(exists=True))
-@click.option(
-    "--dry-run/--execute",
-    default=True,
-    help="[Optional] Simulate orders without executing. Default: --dry-run",
-)
-@click.option(
-    "--force",
-    is_flag=True,
-    help="[Optional] Force execution even if market is closed",
-)
-@click.option(
-    "--tif",
-    type=click.Choice(["day", "gtc", "ioc", "fok"]),
-    default="day",
-    help="[Optional] Time in force. Choices: day, gtc, ioc, fok. Default: day",
-)
-@click.option(
-    "--timeout",
-    type=int,
-    default=60,
-    help="[Optional] Timeout in seconds to wait for sell orders. Default: 60",
-)
-@click.option(
-    "--yes",
-    "-y",
-    is_flag=True,
-    help="[Optional] Skip confirmation prompt",
-)
-def rebalance_notional(
-    target_weights_path: str,
-    dry_run: bool,
-    force: bool,
-    tif: str,
-    timeout: int,
-    yes: bool,
-) -> None:
-    """Rebalance portfolio using NOTIONAL market orders with sell-first execution.
-
-    This command:
-    1. Shows the calculation breakdown (current vs target weights/values)
-    2. Places SELL orders first and waits for them to complete
-    3. Then places BUY orders using notional values from target weights
-
-    TARGET_WEIGHTS_PATH: Path to JSON file with target weights, e.g. {"AAPL": 0.5, "CASH": 0.5}
-
-    Note: Unlike 'rebalance', this command uses notional (dollar value) orders instead of
-    quantity-based orders, and strictly executes sells before buys to ensure cash availability.
-    """
-
-    logger.info(f"Rebalancing portfolio with notional orders (Dry Run: {dry_run})...")
-
-    # Load weights
-    try:
-        with open(target_weights_path, "r") as f:
-            target_weights = json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to load weights file: {e}")
-        return
-
-    if not isinstance(target_weights, dict):
-        logger.error("Invalid weights format. Must be a JSON dictionary.")
-        return
-
-    # Validate weights before processing
-    non_cash_weights = {k: v for k, v in target_weights.items() if k != "CASH"}
-    non_cash_sum = sum(non_cash_weights.values())
-
-    # Check for negative weights
-    for sym, weight in non_cash_weights.items():
-        if weight < 0:
-            logger.error(f"Invalid negative weight for {sym}: {weight}")
-            return
-
-    # Check if weights exceed 100%
-    if non_cash_sum > 1.0 + 1e-9:
-        logger.error(
-            f"Total weight ({non_cash_sum:.2%}) exceeds 100%. "
-            f"Please adjust your weights. Current weights:"
-        )
-        for sym, weight in non_cash_weights.items():
-            logger.error(f"  {sym}: {weight:.2%}")
-        return
-
-    # Auto-calculate CASH if not specified
-    if "CASH" not in target_weights:
-        target_weights["CASH"] = 1.0 - non_cash_sum
-        logger.info(
-            f"'CASH' not specified, calculated as: {target_weights['CASH']:.2%}"
-        )
-
-    # Validate total equals 100%
-    total_weight = sum(target_weights.values())
-    if not (0.99 <= total_weight <= 1.01):
-        logger.error(
-            f"Total weight is {total_weight:.4f}. Must be between 0.99 and 1.01."
-        )
-        return
-
-    client = get_trading_client()
-
-    # Check market status
-    if not force and not dry_run:
-        try:
-            clock = client.get_clock()
-            if not clock.is_open:
-                logger.error("Market is closed. Use --force to override.")
-                return
-        except Exception as e:
-            logger.error(f"Failed to check market status: {e}")
-            return
-
-    # Get account and positions
-    try:
-        account = client.get_account()
-        positions = client.get_all_positions()
-    except Exception as e:
-        logger.error(f"Failed to fetch account: {e}")
-        return
-
-    current_equity = float(account.equity)
-    current_positions = {p.symbol: float(p.qty) for p in positions}
-    position_values = {p.symbol: float(p.market_value) for p in positions}
-
-    # Get all symbols
-    all_symbols = set(target_weights.keys()) | set(current_positions.keys())
-    all_symbols.discard("CASH")
-
-    if not all_symbols:
-        logger.info("No assets to rebalance.")
-        return
-
-    # Fetch current prices for display purposes
-    crypto_symbols = [s for s in all_symbols if "/" in s]
-    stock_symbols = [s for s in all_symbols if "/" not in s]
-    current_prices = {}
-
-    if stock_symbols:
-        try:
-            stock_client = get_stock_data_client()
-            stock_prices = get_stock_latest_price_with_fallback(
-                list(stock_symbols), stock_client
-            )
-            current_prices.update(stock_prices)
-        except Exception as e:
-            logger.error(f"Failed to fetch stock prices: {e}")
-            return
-
-    if crypto_symbols:
-        try:
-            crypto_client = get_crypto_data_client()
-            crypto_prices = get_crypto_latest_price_with_fallback(
-                list(crypto_symbols), crypto_client
-            )
-            current_prices.update(crypto_prices)
-        except Exception as e:
-            logger.error(f"Failed to fetch crypto prices: {e}")
-            return
-
-    # Check missing prices
-    missing = [s for s in all_symbols if s not in current_prices]
-    if missing:
-        logger.error(f"Missing prices for: {missing}")
-        return
-
-    # =========================================================================
-    # CALCULATION DISPLAY (shown but not used for order placement)
-    # =========================================================================
-    logger.info("Portfolio Analysis (Calculations for Reference):")
-
-    value_rows = []
-    calculated_orders = []
-
-    for symbol in sorted(all_symbols):
-        current_qty = current_positions.get(symbol, 0)
-        price = current_prices.get(symbol, 0)
-        current_value = position_values.get(symbol, current_qty * price)
-        current_weight = current_value / current_equity if current_equity > 0 else 0
-
-        target_weight = target_weights.get(symbol, 0)
-        target_value = target_weight * current_equity
-        diff_value = target_value - current_value
-
-        value_rows.append(
-            [
-                symbol,
-                f"{current_weight:.2%}",
-                f"{target_weight:.2%}",
-                format_currency(current_value),
-                format_currency(target_value),
-                format_currency(diff_value),
-            ]
-        )
-
-        # Determine if we need to buy or sell
-        if abs(diff_value) >= 1.0:  # $1 minimum threshold
-            if diff_value < 0:
-                calculated_orders.append(
-                    {
-                        "symbol": symbol,
-                        "side": "sell",
-                        "notional": abs(diff_value),
-                        "current_qty": current_qty,
-                    }
-                )
-            else:
-                calculated_orders.append(
-                    {
-                        "symbol": symbol,
-                        "side": "buy",
-                        "notional": abs(diff_value),
-                    }
-                )
-
-    # Add CASH row
-    cash_current_value = current_equity - sum(
-        position_values.get(s, current_positions.get(s, 0) * current_prices.get(s, 0))
-        for s in all_symbols
-    )
-    cash_current_weight = (
-        cash_current_value / current_equity if current_equity > 0 else 0
-    )
-    cash_target_weight = target_weights.get("CASH", 0)
-    cash_target_value = cash_target_weight * current_equity
-    cash_diff = cash_target_value - cash_current_value
-
-    value_rows.append(
-        [
-            "CASH",
-            f"{cash_current_weight:.2%}",
-            f"{cash_target_weight:.2%}",
-            format_currency(cash_current_value),
-            format_currency(cash_target_value),
-            format_currency(cash_diff),
-        ]
-    )
-
-    print_table(
-        f"Market Value Breakdown (Equity: {format_currency(current_equity)})",
-        ["Symbol", "Current %", "Target %", "Current Value", "Target Value", "Diff"],
-        value_rows,
-    )
-
-    # =========================================================================
-    # ORDER PLANNING (using target weights directly for notional)
-    # =========================================================================
-    sell_orders = [o for o in calculated_orders if o["side"] == "sell"]
-    buy_orders = [o for o in calculated_orders if o["side"] == "buy"]
-
-    if not sell_orders and not buy_orders:
-        logger.info("Portfolio is balanced. No orders needed.")
-        return
-
-    # Display proposed orders
-    logger.info("Proposed Notional Orders:")
-    order_rows = []
-    for o in sell_orders + buy_orders:
-        order_rows.append(
-            [
-                o["symbol"],
-                o["side"].upper(),
-                format_currency(o["notional"]),
-                "MARKET",
-            ]
-        )
-    print_table("Proposed Orders", ["Symbol", "Side", "Notional", "Type"], order_rows)
-
-    if dry_run:
-        logger.info("Dry run complete. Use --execute to place orders.")
-        return
-
-    # Confirmation
-    if not yes:
-        if not click.confirm("Proceed with execution? (Sells first, then Buys)"):
-            logger.info("Cancelled.")
-            return
-
-    # =========================================================================
-    # EXECUTION PHASE
-    # =========================================================================
-
-    # Phase 1: Execute all SELL orders
-    if sell_orders:
-        logger.info("Phase 1: Executing SELL orders...")
-        sell_order_ids = []
-
-        for o in sell_orders:
-            try:
-                # For sells, we sell by quantity (close the difference)
-                # Calculate notional for selling
-                req = create_market_order(
-                    symbol=o["symbol"],
-                    side=OrderSide.SELL,
-                    notional=round(o["notional"], 2),  # Notional order
-                    tif=tif,
-                )
-                result = submit_order(req)
-                if result:
-                    sell_order_ids.append(result.id)
-                    logger.info(f"Sell order submitted for {o['symbol']}: {result.id}")
-            except Exception as e:
-                logger.error(f"Failed to submit sell order for {o['symbol']}: {e}")
-
-        # Wait for all sell orders to complete
-        logger.info("Waiting for sell orders to complete...")
-        all_sells_filled = True
-        for order_id in sell_order_ids:
-            if not _wait_for_order_completion(
-                client, order_id, timeout_seconds=timeout
-            ):
-                all_sells_filled = False
-                logger.warning(f"Sell order {order_id} did not complete successfully.")
-
-        if not all_sells_filled:
-            logger.warning(
-                "Not all sell orders completed. Proceeding with buy orders anyway."
-            )
-
-    # Phase 2: Execute all BUY orders with notional values
-    if buy_orders:
-        logger.info("Phase 2: Executing BUY orders with notional values...")
-
-        for o in buy_orders:
-            try:
-                # Use notional value directly from target weight calculation
-                req = create_market_order(
-                    symbol=o["symbol"],
-                    side=OrderSide.BUY,
-                    notional=round(o["notional"], 2),  # Notional order
-                    tif=tif,
-                )
-                result = submit_order(req)
-                if result:
-                    logger.info(f"Buy order submitted for {o['symbol']}: {result.id}")
-            except Exception as e:
-                logger.error(f"Failed to submit buy order for {o['symbol']}: {e}")
-
-    logger.info("Rebalancing complete.")
 
 
 @portfolio.command("sell-notional")
@@ -1972,11 +1762,17 @@ def buy_portfolio_notional(
     is_flag=True,
     help="[Optional] Skip confirmation prompt",
 )
+@click.option(
+    "--include-short",
+    is_flag=True,
+    help="[Optional] Include short positions",
+)
 def take_profit_all(
     percentage: float,
     dry_run: bool,
     tif: Optional[str],
     yes: bool,
+    include_short: bool,
 ) -> None:
     """Set take-profit limit orders for all open positions.
 
@@ -2003,23 +1799,29 @@ def take_profit_all(
 
     orders_to_place = []
     for pos in positions:
-        if pos.side.name != "LONG":
+        if pos.side.name != "LONG" and not include_short:
             continue
 
         current_price = float(pos.current_price)
-        limit_price = current_price * (1 + (percentage / 100))
+        if pos.side.name == "LONG":
+            limit_price = current_price * (1 + (percentage / 100))
+            side = OrderSide.SELL
+        else:
+            limit_price = current_price * (1 - (percentage / 100))
+            side = OrderSide.BUY
 
         orders_to_place.append(
             {
                 "symbol": pos.symbol,
-                "qty": float(pos.qty),
+                "qty": abs(float(pos.qty)),
                 "limit_price": limit_price,
                 "current_price": current_price,
+                "side": side,
             }
         )
 
     if not orders_to_place:
-        logger.info("No valid long positions to apply take-profit.")
+        logger.info("No valid positions to apply take-profit.")
         return
 
     order_rows = []
@@ -2055,7 +1857,7 @@ def take_profit_all(
             order_tif = tif or ("day" if is_fractional else "gtc")
             req = create_limit_order(
                 symbol=o["symbol"],
-                side=OrderSide.SELL,
+                side=o["side"],
                 qty=o["qty"],
                 limit_price=round(o["limit_price"], 2),
                 tif=order_tif,
@@ -2086,11 +1888,17 @@ def take_profit_all(
     is_flag=True,
     help="[Optional] Skip confirmation prompt",
 )
+@click.option(
+    "--include-short",
+    is_flag=True,
+    help="[Optional] Include short positions",
+)
 def trailing_stop_all(
     percentage: float,
     dry_run: bool,
     tif: Optional[str],
     yes: bool,
+    include_short: bool,
 ) -> None:
     """Set trailing stop orders for all open positions.
 
@@ -2117,15 +1925,17 @@ def trailing_stop_all(
 
     orders_to_place = []
     for pos in positions:
-        if pos.side.name != "LONG":
+        if pos.side.name != "LONG" and not include_short:
             continue
 
+        side = OrderSide.SELL if pos.side.name == "LONG" else OrderSide.BUY
+
         orders_to_place.append(
-            {"symbol": pos.symbol, "qty": float(pos.qty), "trail_percent": percentage}
+            {"symbol": pos.symbol, "qty": abs(float(pos.qty)), "trail_percent": percentage, "side": side}
         )
 
     if not orders_to_place:
-        logger.info("No valid long positions to apply trailing stops.")
+        logger.info("No valid positions to apply trailing stops.")
         return
 
     order_rows = []
@@ -2152,7 +1962,7 @@ def trailing_stop_all(
             order_tif = tif or ("day" if is_fractional else "gtc")
             req = create_trailing_stop_order(
                 symbol=o["symbol"],
-                side=OrderSide.SELL,
+                side=o["side"],
                 qty=o["qty"],
                 trail_percent=o["trail_percent"],
                 tif=order_tif,
@@ -2191,6 +2001,11 @@ def trailing_stop_all(
     is_flag=True,
     help="[Optional] Skip confirmation prompt",
 )
+@click.option(
+    "--include-short",
+    is_flag=True,
+    help="[Optional] Include short positions",
+)
 def bracket_all(
     take_profit_pct: float,
     stop_loss_pct: float,
@@ -2198,6 +2013,7 @@ def bracket_all(
     tif: Optional[str],
     dry_run: bool,
     yes: bool,
+    include_short: bool,
 ) -> None:
     """Set OCO bracket orders (take-profit & stop-loss) for all open positions.
 
@@ -2225,31 +2041,43 @@ def bracket_all(
 
     orders_to_place = []
     for pos in positions:
-        if pos.side.name != "LONG":
+        if pos.side.name != "LONG" and not include_short:
             continue
 
         current_price = float(pos.current_price)
-        tp_price = current_price * (1 + (take_profit_pct / 100))
-        sl_price = current_price * (1 - (stop_loss_pct / 100))
-        sl_limit_price = (
-            current_price * (1 - (stop_loss_limit_pct / 100))
-            if stop_loss_limit_pct
-            else None
-        )
+        if pos.side.name == "LONG":
+            tp_price = current_price * (1 + (take_profit_pct / 100))
+            sl_price = current_price * (1 - (stop_loss_pct / 100))
+            sl_limit_price = (
+                current_price * (1 - (stop_loss_limit_pct / 100))
+                if stop_loss_limit_pct
+                else None
+            )
+            side = OrderSide.SELL
+        else:
+            tp_price = current_price * (1 - (take_profit_pct / 100))
+            sl_price = current_price * (1 + (stop_loss_pct / 100))
+            sl_limit_price = (
+                current_price * (1 + (stop_loss_limit_pct / 100))
+                if stop_loss_limit_pct
+                else None
+            )
+            side = OrderSide.BUY
 
         orders_to_place.append(
             {
                 "symbol": pos.symbol,
-                "qty": float(pos.qty),
+                "qty": abs(float(pos.qty)),
                 "current_price": current_price,
                 "take_profit_price": tp_price,
                 "stop_loss_price": sl_price,
                 "stop_loss_limit_price": sl_limit_price,
+                "side": side,
             }
         )
 
     if not orders_to_place:
-        logger.info("No valid long positions to apply brackets.")
+        logger.info("No valid positions to apply brackets.")
         return
 
     order_rows = []
@@ -2288,6 +2116,7 @@ def bracket_all(
             is_fractional = not float(o["qty"]).is_integer()
             order_tif = tif or ("day" if is_fractional else "gtc")
 
+            # Build bracket legs (take-profit + stop-loss)
             bracket_params = _build_bracket_params(
                 take_profit=round(o["take_profit_price"], 2),
                 stop_loss=round(o["stop_loss_price"], 2),
@@ -2298,12 +2127,15 @@ def bracket_all(
                 ),
             )
 
+            # For exit-only OCO orders on existing positions, override to OCO
+            # (not BRACKET, which is for entry orders with attached exit legs)
+            bracket_params["order_class"] = OrderClass.OCO
+
             req = LimitOrderRequest(
                 symbol=o["symbol"],
-                side=OrderSide.SELL,
+                side=o["side"],
                 qty=o["qty"],
                 time_in_force=TimeInForce(order_tif),
-                order_class=OrderClass.OCO,
                 limit_price=round(o["take_profit_price"], 2),
                 **bracket_params,
             )
