@@ -26,23 +26,25 @@ graph TD
 - **`core/`**: Handles foundational logic including application configurations, credentials (`config.py`), constants (`constants.py`), and custom logging (`logger.py`).
 - **`cli/`**: The presentation layer.
   - **`commands/`**: Organized Click command groups (`trading/`, `data/`, `portfolio.py`, `config.py`, `dashboard.py`).
-  - **`tui/`**: Textual terminal workstation dashboard (`app.py`, `stream.py`).
+  - **`tui/`**: Modular Textual terminal workstation dashboard (`app.py`, `modals.py`, `widgets.py`, `stream.py`).
   - **`formatters.py` & `theme.py`**: Rich console tables and color palettes.
 
 ## Textual TUI Workstation (`src/alpaca_cli/cli/tui/`)
 
 ### Architecture & Components
-- **`app.py`**: `DashboardApp(App)` managing event loops, state, modals, hotkey bindings, and 5-tab workstation navigation.
+- **`app.py`**: `DashboardApp(App)` managing event loops, state, hotkey bindings, and 5-tab workstation navigation.
+- **`modals.py`**: Extracted interactive screens (`AssetInfoModal`, `OrderInfoModal`, `PositionModal`, `NewsReaderModal`, `ActivityLogModal`).
+- **`widgets.py`**: Visual helper utilities (`generate_sparkline`).
 - **`stream.py`**: `MarketStreamer` (`StockDataStream`) and `NewsStreamer` (`NewsDataStream`) running background WebSocket threads. Safely communicates ticks to UI via `app.call_from_thread()`.
 
 ### 5 Main Workstation Tabs
 1. **Portfolio Tab**: 2x3 summary card grid (`Equity`, `Buying Power`, `Cash`, `Day P&L`, `Margin Maintenance`, `PDT Status`), 2-column split layout containing `Open Positions Table` (blue `[LONG]` / magenta `[SHORT]` badges) and `Asset Allocation Progress Bar Chart`.
-2. **Markets Tab (Watchlist)**: Top Bloomberg horizontal marquee ticker tape (`SPY`, `QQQ`, `DIA`, `IWM`, `VIX`), 7-column data-dense `#markets_table` with **ASCII intraday sparklines (`▂▃▄▅▆▇█`)**, live tick cell updates via `table.update_cell()`, sector preset buttons (`+ Tech`, `+ Indices`, `+ Crypto`).
+2. **Markets Tab (Watchlist)**: Top Bloomberg horizontal marquee ticker tape (`SPY`, `QQQ`, `DIA`, `IWM`, `VIX`), 7-column data-dense `#markets_table` with **ASCII intraday sparklines (`▂▃▄▅▆▇█`)**, live tick cell updates via `table.update_cell()`, ticker add form.
 3. **Trade Tab**: Advanced 2-column order ticket supporting Market/Limit, Notional/Qty, TIF, and Price ($) / Percent (%) Take Profit & Stop Loss brackets with market snapshot price auto-fill.
 4. **Orders Tab**: `#orders_table` listing open/active orders with 1-click `Cancel All Open Orders` action.
 5. **Market News Tab**: Real-time breaking news feed, symbol search filter (`NVDA`, `AAPL`) with `Enter` key support, and `NewsReaderModal` for reading full un-truncated articles with a 1-click **"Trade Ticker"** action.
 
-### Interactive Modal Screens
+### Interactive Modal Screens (`modals.py`)
 - **`PositionModal`**: Summary view of cost basis, unrealized PnL, and 1-click position liquidation (`client.close_position`).
 - **`OrderInfoModal`**: Displays order details, TIF, limit prices, and 1-click order cancellation.
 - **`AssetInfoModal`**: Displays Alpaca asset properties (tradable, shortable, marginable, easy to borrow) and 1-click watchlist removal.

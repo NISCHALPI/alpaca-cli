@@ -1,443 +1,25 @@
+from datetime import datetime
+
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, DataTable, TabbedContent, TabPane, Static, Input, Button, Label, Select, Log, Rule
 from textual.containers import Horizontal, Vertical, Grid, VerticalScroll
-from textual.reactive import reactive
-from textual.message import Message
-from textual.events import Click
-from textual.screen import ModalScreen
 from rich.text import Text
 
-from alpaca_cli.api.client import get_trading_client, get_stock_data_client
+from alpaca_cli.api.client import get_trading_client, get_stock_data_client, get_crypto_data_client
 from alpaca_cli.cli.tui.stream import MarketStreamer, NewsStreamer
-from alpaca.data.requests import StockSnapshotRequest, NewsRequest
+from alpaca_cli.cli.tui.widgets import generate_sparkline
+from alpaca_cli.cli.tui.modals import (
+    AssetInfoModal,
+    OrderInfoModal,
+    PositionModal,
+    NewsReaderModal,
+    ActivityLogModal,
+)
+from alpaca.data.requests import StockSnapshotRequest, CryptoSnapshotRequest, NewsRequest
 from alpaca.data.historical.news import NewsClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca_cli.core.config import config
 
-def generate_sparkline(prices: list[float]) -> str:
-    """Generate an 8-level ASCII Unicode sparkline string from a price series."""
-    if not prices or len(prices) < 2:
-        return " ─── "
-        
-    min_p = min(prices)
-    max_p = max(prices)
-    rng = max_p - min_p
-    
-    ticks = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█']
-    if rng == 0:
-        return ticks[3] * min(len(prices), 8)
-        
-    result = []
-    if len(prices) > 8:
-        step = len(prices) / 8.0
-        sampled = [prices[int(i * step)] for i in range(8)]
-    else:
-        sampled = prices
-        
-    for p in sampled:
-        idx = int(((p - min_p) / rng) * 7)
-        idx = max(0, min(7, idx))
-        result.append(ticks[idx])
-        
-    return "".join(result)
-
-class AssetInfoModal(ModalScreen):
-    BINDINGS = [("escape", "dismiss", "Close")]
-    CSS = """
-    AssetInfoModal {
-        align: center middle;
-    }
-    #asset-modal-dialog {
-        width: 85;
-        height: auto;
-        padding: 1 2;
-        border: heavy $accent;
-        background: $surface;
-    }
-    .asset-modal-title {
-        text-align: center;
-        text-style: bold;
-        color: $accent;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    #asset_data_table {
-        height: auto;
-        border: none;
-    }
-    #asset_modal_btn_container {
-        margin-top: 1;
-        height: auto;
-    }
-    .asset-modal-btn {
-        width: 1fr;
-        margin: 0 1;
-    }
-    """
-    
-    def __init__(self, asset, **kwargs):
-        super().__init__(**kwargs)
-        self.asset = asset
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="asset-modal-dialog"):
-            yield Label(f"Asset Information: {self.asset.symbol}", classes="asset-modal-title")
-            
-            table = DataTable(id="asset_data_table")
-            table.show_header = False
-            table.add_columns("Field", "Value")
-            
-            fields = [
-                ("Symbol", str(self.asset.symbol)),
-                ("Name", str(self.asset.name)),
-                ("Exchange", str(self.asset.exchange)),
-                ("Class", str(self.asset.asset_class)),
-                ("Status", str(self.asset.status).upper()),
-                ("Tradable", "[green]Yes[/green]" if self.asset.tradable else "[red]No[/red]"),
-                ("Marginable", "[green]Yes[/green]" if self.asset.marginable else "[red]No[/red]"),
-                ("Shortable", "[green]Yes[/green]" if self.asset.shortable else "[red]No[/red]"),
-                ("Easy to Borrow", "[green]Yes[/green]" if getattr(self.asset, 'easy_to_borrow', False) else "[red]No[/red]"),
-                ("Fractionable", "[green]Yes[/green]" if getattr(self.asset, 'fractionable', False) else "[red]No[/red]"),
-            ]
-            
-            for f, v in fields:
-                table.add_row(f, str(v))
-                
-            yield table
-            
-            with Horizontal(id="asset_modal_btn_container"):
-                yield Button("Remove Watchlist", id="remove_watchlist_modal_btn", variant="error", classes="asset-modal-btn")
-                yield Button("Close", id="close_modal_btn", variant="primary", classes="asset-modal-btn")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "remove_watchlist_modal_btn":
-            self.app.call_later(self.app.action_remove_symbol, self.asset.symbol)
-            self.dismiss()
-        elif event.button.id == "close_modal_btn":
-            self.dismiss()
-
-class OrderInfoModal(ModalScreen):
-    BINDINGS = [("escape", "dismiss", "Close")]
-    CSS = """
-    OrderInfoModal {
-        align: center middle;
-    }
-    #order-modal-dialog {
-        width: 85;
-        height: auto;
-        padding: 1 2;
-        border: heavy $accent;
-        background: $surface;
-    }
-    .order-modal-title {
-        text-align: center;
-        text-style: bold;
-        color: $accent;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    #order_info_table {
-        height: auto;
-        border: none;
-    }
-    #order_modal_btn_container {
-        margin-top: 1;
-        height: auto;
-    }
-    .order-modal-btn {
-        width: 1fr;
-    }
-    """
-
-    def __init__(self, order, **kwargs):
-        super().__init__(**kwargs)
-        self.order = order
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="order-modal-dialog"):
-            yield Label(f"Order Details: {self.order.symbol} ({str(self.order.id)[:8]})", classes="order-modal-title")
-            
-            table = DataTable(id="order_info_table")
-            table.show_header = False
-            table.add_columns("Field", "Value")
-            
-            table.add_row("Order ID", str(self.order.id))
-            table.add_row("Symbol", str(self.order.symbol))
-            table.add_row("Side", str(self.order.side).upper())
-            table.add_row("Quantity", str(self.order.qty))
-            table.add_row("Filled Qty", str(getattr(self.order, 'filled_qty', '0')))
-            table.add_row("Order Type", str(self.order.order_type).upper())
-            table.add_row("Time In Force", str(self.order.time_in_force).upper())
-            table.add_row("Status", str(self.order.status).upper())
-            if getattr(self.order, "limit_price", None):
-                table.add_row("Limit Price", f"${float(self.order.limit_price):.2f}")
-            if getattr(self.order, "stop_price", None):
-                table.add_row("Stop Price", f"${float(self.order.stop_price):.2f}")
-            if getattr(self.order, "filled_avg_price", None):
-                table.add_row("Avg Fill Price", f"${float(self.order.filled_avg_price):.2f}")
-            table.add_row("Submitted At", str(getattr(self.order, "submitted_at", "-"))[:19])
-            
-            yield table
-            
-            status_str = str(self.order.status).lower()
-            is_active = any(s in status_str for s in ["new", "accepted", "pending", "partially_filled", "held"])
-            
-            with Horizontal(id="order_modal_btn_container"):
-                if is_active:
-                    yield Button("Cancel Order", id="modal_cancel_order_btn", variant="error", classes="order-modal-btn")
-                yield Button("Close", id="modal_close_btn", variant="primary", classes="order-modal-btn")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "modal_cancel_order_btn":
-            try:
-                client = get_trading_client()
-                client.cancel_order_by_id(self.order.id)
-                self.app.notify(f"Cancelled order {str(self.order.id)[:8]} for {self.order.symbol}", title="Order Cancelled", severity="warning")
-                self.app.load_orders()
-            except Exception as e:
-                self.app.notify(f"Cancel failed: {e}", severity="error")
-            self.dismiss()
-        elif event.button.id == "modal_close_btn":
-            self.dismiss()
-
-class PositionModal(ModalScreen):
-    BINDINGS = [("escape", "dismiss", "Close")]
-    CSS = """
-    PositionModal {
-        align: center middle;
-    }
-    #pos-modal-dialog {
-        width: 85;
-        height: auto;
-        padding: 1 2;
-        border: heavy $accent;
-        background: $surface;
-    }
-    .pos-modal-title {
-        text-align: center;
-        text-style: bold;
-        color: $accent;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    #pos_info_table {
-        height: auto;
-        border: none;
-    }
-    #pos_modal_btn_container {
-        margin-top: 1;
-        height: auto;
-    }
-    .pos-modal-btn {
-        width: 1fr;
-    }
-    """
-
-    def __init__(self, position, **kwargs):
-        super().__init__(**kwargs)
-        self.position = position
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="pos-modal-dialog"):
-            yield Label(f"Position Summary: {self.position.symbol}", classes="pos-modal-title")
-            
-            table = DataTable(id="pos_info_table")
-            table.show_header = False
-            table.add_columns("Field", "Value")
-            
-            pnl_val = float(self.position.unrealized_pl)
-            pnl_color = "green" if pnl_val >= 0 else "red"
-            
-            table.add_row("Symbol", str(self.position.symbol))
-            table.add_row("Side", str(self.position.side).upper())
-            table.add_row("Quantity", str(self.position.qty))
-            table.add_row("Avg Entry Price", f"${float(self.position.avg_entry_price):.2f}")
-            table.add_row("Current Price", f"${float(self.position.current_price):.2f}")
-            table.add_row("Market Value", f"${float(self.position.market_value):.2f}")
-            table.add_row("Cost Basis", f"${float(self.position.cost_basis):.2f}")
-            table.add_row("Unrealized PnL", f"[{pnl_color}]${pnl_val:.2f} ({float(self.position.unrealized_plpc)*100:.2f}%)[/{pnl_color}]")
-            
-            yield table
-            
-            with Horizontal(id="pos_modal_btn_container"):
-                yield Button("Liquidate Position", id="modal_close_pos_btn", variant="error", classes="pos-modal-btn")
-                yield Button("Close", id="modal_close_btn", variant="primary", classes="pos-modal-btn")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "modal_close_pos_btn":
-            try:
-                client = get_trading_client()
-                client.close_position(self.position.symbol)
-                self.app.notify(f"Liquidating position for {self.position.symbol}...", title="Position Closing", severity="warning")
-                self.app.load_portfolio()
-            except Exception as e:
-                self.app.notify(f"Close failed: {e}", severity="error")
-            self.dismiss()
-        elif event.button.id == "modal_close_btn":
-            self.dismiss()
-
-class NewsReaderModal(ModalScreen):
-    BINDINGS = [("escape", "dismiss", "Close")]
-    CSS = """
-    NewsReaderModal {
-        align: center middle;
-    }
-    #news-modal-dialog {
-        width: 85;
-        height: auto;
-        max-height: 85%;
-        padding: 1 2;
-        border: heavy $accent;
-        background: $surface;
-    }
-    .news-modal-title {
-        text-align: center;
-        text-style: bold;
-        color: $accent;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    #news_meta_table {
-        height: auto;
-        border: none;
-        margin-bottom: 1;
-    }
-    #news_body_container {
-        height: auto;
-        min-height: 5;
-        max-height: 12;
-        border: round $primary;
-        padding: 1;
-        margin-bottom: 1;
-        background: $panel;
-    }
-    #news_modal_btn_container {
-        margin-top: 1;
-        height: auto;
-    }
-    .news-modal-btn {
-        width: 1fr;
-        margin: 0 1;
-    }
-    """
-
-    def __init__(self, article, **kwargs):
-        super().__init__(**kwargs)
-        self.article = article
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="news-modal-dialog"):
-            headline = self.article.get("headline") if isinstance(self.article, dict) else getattr(self.article, "headline", "Market News")
-            yield Label(f"{headline}", classes="news-modal-title")
-            
-            table = DataTable(id="news_meta_table")
-            table.show_header = False
-            table.add_columns("Field", "Value")
-            
-            author = self.article.get("author") if isinstance(self.article, dict) else getattr(self.article, "author", "Unknown")
-            source = self.article.get("source") if isinstance(self.article, dict) else getattr(self.article, "source", "Unknown")
-            created_at = self.article.get("created_at") if isinstance(self.article, dict) else getattr(self.article, "created_at", None)
-            symbols = self.article.get("symbols") if isinstance(self.article, dict) else getattr(self.article, "symbols", [])
-            
-            symbols_str = ", ".join(symbols) if symbols else "General Market"
-            
-            table.add_row("Source", str(source).upper())
-            table.add_row("Author", str(author))
-            table.add_row("Published", str(created_at)[:19] if created_at else "-")
-            table.add_row("Tickers", f"[bold cyan]{symbols_str}[/bold cyan]")
-            yield table
-            
-            summary = self.article.get("summary") if isinstance(self.article, dict) else getattr(self.article, "summary", "No summary available.")
-            with VerticalScroll(id="news_body_container"):
-                yield Static(f"[b]Summary:[/b]\n{summary}")
-                
-            with Horizontal(id="news_modal_btn_container"):
-                if symbols:
-                    yield Button(f"Trade {symbols[0]}", id="modal_trade_news_btn", variant="success", classes="news-modal-btn")
-                yield Button("Close", id="modal_close_btn", variant="primary", classes="news-modal-btn")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "modal_trade_news_btn":
-            symbols = self.article.get("symbols") if isinstance(self.article, dict) else getattr(self.article, "symbols", [])
-            if symbols:
-                sym = symbols[0]
-                try:
-                    self.app.query_one("#trade_symbol", Input).value = sym
-                    self.app.query_one("TabbedContent").active = "trade_tab"
-                    self.app.notify(f"Pre-filled trade ticket with {sym} from news article.", severity="information")
-                except Exception:
-                    pass
-            self.dismiss()
-        elif event.button.id == "modal_close_btn":
-            self.dismiss()
-
-class ActivityLogModal(ModalScreen):
-    BINDINGS = [
-        ("escape", "dismiss", "Close"),
-        ("ctrl+l", "dismiss", "Close Log"),
-    ]
-    CSS = """
-    ActivityLogModal {
-        align: center middle;
-    }
-    #log-modal-dialog {
-        width: 90%;
-        height: 85%;
-        padding: 1 2;
-        border: heavy $accent;
-        background: $surface;
-    }
-    .log-modal-title {
-        text-align: center;
-        text-style: bold;
-        color: $accent;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    #modal_execution_log_drawer {
-        height: 1fr;
-        width: 100%;
-        border: round $accent;
-        background: $panel;
-        padding: 1;
-    }
-    #log_modal_btn_container {
-        margin-top: 1;
-        height: auto;
-    }
-    .log-modal-btn {
-        width: 1fr;
-        margin: 0 1;
-    }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="log-modal-dialog"):
-            yield Label("System Activity & Execution Log [dim](Ctrl+L / Esc to Close)[/dim]", classes="log-modal-title")
-            yield Log(id="modal_execution_log_drawer")
-            with Horizontal(id="log_modal_btn_container"):
-                yield Button("Clear Log", id="modal_clear_log_btn", variant="error", classes="log-modal-btn")
-                yield Button("Close (Esc)", id="modal_close_btn", variant="primary", classes="log-modal-btn")
-
-    def on_mount(self) -> None:
-        try:
-            log_widget = self.query_one("#modal_execution_log_drawer", Log)
-            for line in getattr(self.app, "log_buffer", []):
-                log_widget.write_line(line)
-        except Exception:
-            pass
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "modal_clear_log_btn":
-            try:
-                self.query_one("#modal_execution_log_drawer", Log).clear()
-                if hasattr(self.app, "log_buffer"):
-                    self.app.log_buffer.clear()
-                self.app.notify("Activity log cleared", severity="information")
-            except Exception:
-                pass
-        elif event.button.id == "modal_close_btn":
-            self.dismiss()
 
 class DashboardApp(App):
     BINDINGS = [
@@ -450,9 +32,17 @@ class DashboardApp(App):
 
     CSS = """
     .form-group {
-        margin: 1;
+        margin: 0 1 1 1;
         layout: horizontal;
         height: 3;
+        align: left middle;
+    }
+    .form-group Input {
+        width: 32;
+    }
+    .form-group Button {
+        min-width: 8;
+        margin-left: 1;
     }
     #portfolio_tab {
         layout: vertical;
@@ -507,10 +97,31 @@ class DashboardApp(App):
         color: $accent;
         margin-bottom: 1;
     }
-    .preset-btn {
-        margin-left: 1;
+    .ticket-btn-group {
+        height: auto;
+        margin-top: 1;
+    }
+    .ticket-btn-group Button {
+        margin-right: 1;
+    }
+    #markets_tab {
+        layout: vertical;
     }
     #markets_table {
+        height: 1fr;
+        width: 100%;
+    }
+    #orders_tab {
+        layout: vertical;
+    }
+    #orders_table {
+        height: 1fr;
+        width: 100%;
+    }
+    #news_tab {
+        layout: vertical;
+    }
+    #news_table {
         height: 1fr;
         width: 100%;
     }
@@ -553,16 +164,6 @@ class DashboardApp(App):
         text-style: bold;
         margin-bottom: 1;
     }
-    #log_tab {
-        layout: vertical;
-    }
-    #execution_log_drawer {
-        height: 1fr;
-        width: 100%;
-        border: round $accent;
-        background: $panel;
-        padding: 1;
-    }
     """
 
     def __init__(self, **kwargs):
@@ -603,11 +204,7 @@ class DashboardApp(App):
                 yield Static(id="ticker_marquee_bar")
                 with Horizontal(classes="form-group"):
                     yield Input(placeholder="Add Ticker (e.g. AAPL)", id="new_symbol_input")
-                    yield Button("Add", id="add_symbol_btn", variant="primary")
-                    yield Button("Remove", id="remove_symbol_btn", variant="error")
-                    yield Button("+ Tech", id="preset_tech_btn", classes="preset-btn")
-                    yield Button("+ Indices", id="preset_indices_btn", classes="preset-btn")
-                    yield Button("+ Crypto", id="preset_crypto_btn", classes="preset-btn")
+                    yield Button("Add Ticker", id="add_symbol_btn", variant="primary")
                     
                 yield DataTable(id="markets_table", cursor_type="row")
                 
@@ -678,7 +275,6 @@ class DashboardApp(App):
             
         market_icon = "🟢" if market_state == "OPEN" else "⚪"
             
-        from alpaca_cli.core.config import config
         mode_str = config.mode.upper()
         mode_icon = "🟡" if mode_str == "PAPER" else "🔴"
         
@@ -689,6 +285,7 @@ class DashboardApp(App):
         self.load_markets()
         self.load_orders()
         self.load_news()
+        self.start_stream()
         self.set_interval(0.15, self.animate_ticker_marquee)
         self.log_event(f"System Initialized in {mode_str} mode. Market state: {market_state}.", "info")
 
@@ -715,9 +312,14 @@ class DashboardApp(App):
             except Exception:
                 pass
 
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        try:
+            event.data_table.scroll_to_row(event.cursor_row)
+        except Exception:
+            pass
+
     def log_event(self, msg: str, level: str = "info") -> None:
         try:
-            from datetime import datetime
             time_str = datetime.now().strftime("%H:%M:%S")
             
             if level == "error":
@@ -932,20 +534,48 @@ class DashboardApp(App):
                 
             table.sort(event.column_key, key=sort_key, reverse=self._portfolio_sort_reverse)
 
+    @staticmethod
+    def _extract_snapshot_data(snap) -> dict:
+        """Extract price, prev_close, change, high, and low from an Alpaca Snapshot object."""
+        px = 0.0
+        prev_close = 0.0
+        day_high = 0.0
+        day_low = 0.0
+
+        if snap.previous_daily_bar and snap.previous_daily_bar.close is not None:
+            prev_close = float(snap.previous_daily_bar.close)
+
+        if snap.latest_trade and snap.latest_trade.price is not None:
+            px = float(snap.latest_trade.price)
+        elif snap.daily_bar and snap.daily_bar.close is not None:
+            px = float(snap.daily_bar.close)
+        elif prev_close > 0:
+            px = prev_close
+
+        if prev_close == 0.0:
+            prev_close = px
+
+        if snap.daily_bar:
+            day_high = float(snap.daily_bar.high) if snap.daily_bar.high is not None else px
+            day_low = float(snap.daily_bar.low) if snap.daily_bar.low is not None else px
+        else:
+            day_high = px
+            day_low = px
+
+        chg = px - prev_close if prev_close > 0 else 0.0
+        chg_pct = (chg / prev_close) * 100 if prev_close > 0 else 0.0
+
+        return {
+            "price": px,
+            "prev_close": prev_close,
+            "chg": chg,
+            "chg_pct": chg_pct,
+            "high": day_high if day_high > 0 else px,
+            "low": day_low if day_low > 0 else px,
+        }
+
     def load_markets(self):
         try:
-            table = self.query_one("#markets_table", DataTable)
-            table.clear(columns=True)
-            table.add_columns(
-                "Symbol",
-                Text("Price", justify="right"),
-                Text("Change ($)", justify="right"),
-                Text("Change (%)", justify="right"),
-                Text("Day High", justify="right"),
-                Text("Day Low", justify="right"),
-                Text("Prev Close", justify="right"),
-            )
-            
             benchmarks = ["SPY", "QQQ", "DIA", "IWM", "VIX"]
             
             client = get_stock_data_client()
@@ -956,81 +586,48 @@ class DashboardApp(App):
                 idx_req = StockSnapshotRequest(symbol_or_symbols=benchmarks)
                 idx_snaps = client.get_stock_snapshot(idx_req)
                 for b in benchmarks:
-                    if b in idx_snaps and idx_snaps[b].latest_trade:
-                        snap = idx_snaps[b]
-                        px = float(snap.latest_trade.price)
-                        prev_close = float(snap.previous_daily_bar.close) if (hasattr(snap, "previous_daily_bar") and snap.previous_daily_bar) else px
-                        chg = px - prev_close
-                        chg_pct = (chg / prev_close) * 100 if prev_close > 0 else 0.0
-                        self.index_snapshots[b] = {
-                            "price": px,
-                            "prev_close": prev_close,
-                            "chg": chg,
-                            "chg_pct": chg_pct,
-                        }
+                    if b in idx_snaps:
+                        self.index_snapshots[b] = self._extract_snapshot_data(idx_snaps[b])
             except Exception:
                 pass
             
             # Fetch User Watchlist Snapshots for Bottom Table
             snapshots = {}
-            if self.symbols:
-                stock_syms = [s for s in self.symbols if "/" not in s]
-                crypto_syms = [s for s in self.symbols if "/" in s]
-                
-                if stock_syms:
-                    try:
-                        req = StockSnapshotRequest(symbol_or_symbols=stock_syms)
-                        stock_snaps = client.get_stock_snapshot(req)
-                        if isinstance(stock_snaps, dict):
-                            snapshots.update(stock_snaps)
-                    except Exception:
-                        for s in stock_syms:
-                            try:
-                                single_snap = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=[s]))
-                                if isinstance(single_snap, dict) and s in single_snap:
-                                    snapshots[s] = single_snap[s]
-                            except Exception:
-                                pass
-                                
-                if crypto_syms:
-                    try:
-                        crypto_client = get_crypto_data_client()
-                        c_req = CryptoSnapshotRequest(symbol_or_symbols=crypto_syms)
-                        crypto_snaps = crypto_client.get_crypto_snapshot(c_req)
-                        if isinstance(crypto_snaps, dict):
-                            snapshots.update(crypto_snaps)
-                    except Exception:
-                        for s in crypto_syms:
-                            try:
-                                crypto_client = get_crypto_data_client()
-                                single_snap = crypto_client.get_crypto_snapshot(CryptoSnapshotRequest(symbol_or_symbols=[s]))
-                                if isinstance(single_snap, dict) and s in single_snap:
-                                    snapshots[s] = single_snap[s]
-                            except Exception:
-                                pass
+            stock_syms = [s for s in self.symbols if "/" not in s]
+            crypto_syms = [s for s in self.symbols if "/" in s]
+
+            if stock_syms:
+                try:
+                    req = StockSnapshotRequest(symbol_or_symbols=stock_syms)
+                    stock_snaps = client.get_stock_snapshot(req)
+                    if stock_snaps:
+                        snapshots.update(stock_snaps)
+                except Exception:
+                    pass
+
+            if crypto_syms:
+                try:
+                    crypto_client = get_crypto_data_client()
+                    c_req = CryptoSnapshotRequest(symbol_or_symbols=crypto_syms)
+                    crypto_snaps = crypto_client.get_crypto_snapshot(c_req)
+                    if crypto_snaps:
+                        snapshots.update(crypto_snaps)
+                except Exception:
+                    pass
                 
             self.market_snapshots = {}
             for sym in self.symbols:
-                if sym in snapshots and snapshots[sym].latest_trade:
-                    snap = snapshots[sym]
-                    px = float(snap.latest_trade.price)
-                    prev_close = float(snap.previous_daily_bar.close) if (hasattr(snap, "previous_daily_bar") and snap.previous_daily_bar) else px
-                    chg = px - prev_close
-                    chg_pct = (chg / prev_close) * 100 if prev_close > 0 else 0.0
-                    day_high = float(snap.daily_bar.high) if (hasattr(snap, "daily_bar") and snap.daily_bar) else px
-                    day_low = float(snap.daily_bar.low) if (hasattr(snap, "daily_bar") and snap.daily_bar) else px
-                    
+                if snapshots and sym in snapshots:
+                    self.market_snapshots[sym] = self._extract_snapshot_data(snapshots[sym])
+                else:
                     self.market_snapshots[sym] = {
-                        "price": px,
-                        "prev_close": prev_close,
-                        "chg": chg,
-                        "chg_pct": chg_pct,
-                        "high": day_high,
-                        "low": day_low,
+                        "price": 0.0, "prev_close": 0.0, "chg": 0.0,
+                        "chg_pct": 0.0, "high": 0.0, "low": 0.0,
                     }
 
-            # Populate markets_table
-            self.market_table_symbols = [s for s in self.symbols if s in self.market_snapshots]
+            # Populate markets_table for ALL watchlist symbols
+            self.market_table_symbols = list(self.symbols)
+            table = self.query_one("#markets_table", DataTable)
             table.clear(columns=True)
             table.add_columns(
                 "Symbol", 
@@ -1064,8 +661,6 @@ class DashboardApp(App):
                 )
         except Exception as e:
             self.notify(f"Markets error: {e}", severity="error")
-            
-        self.start_stream()
 
     def start_stream(self):
         if self.streamer:
@@ -1075,10 +670,9 @@ class DashboardApp(App):
             self.call_from_thread(self.update_market_widget, t.symbol, float(t.price))
 
         benchmarks = ["SPY", "QQQ", "DIA", "IWM", "VIX"]
-        stock_stream_syms = [s for s in list(set(self.symbols + benchmarks)) if "/" not in s]
-        if stock_stream_syms:
-            self.streamer = MarketStreamer(stock_stream_syms, on_trade=on_trade)
-            self.streamer.start()
+        stream_syms = list(set(self.symbols + benchmarks))
+        self.streamer = MarketStreamer(stream_syms, on_trade=on_trade)
+        self.streamer.start()
         
         if not self.news_streamer:
             async def on_news(n):
@@ -1232,47 +826,10 @@ class DashboardApp(App):
             inp = self.query_one("#new_symbol_input", Input)
             await self.action_add_symbol(inp.value.upper().strip())
             inp.value = ""
-            
-        elif event.button.id == "remove_symbol_btn":
-            inp = self.query_one("#new_symbol_input", Input)
-            sym = inp.value.upper().strip()
-            if not sym:
-                try:
-                    table = self.query_one("#markets_table", DataTable)
-                    if table.cursor_row < len(self.market_table_symbols):
-                        sym = self.market_table_symbols[table.cursor_row]
-                except Exception:
-                    pass
-            if sym:
-                await self.action_remove_symbol(sym)
-                inp.value = ""
-            
-        elif event.button.id == "preset_tech_btn":
-            for s in ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]:
-                if s not in self.symbols:
-                    self.symbols.append(s)
-                    config.add_to_watchlist(s)
-            self.load_markets()
-            self.notify("Added Tech MegaCaps to watchlist.", severity="information")
-
-        elif event.button.id == "preset_indices_btn":
-            for s in ["SPY", "QQQ", "DIA", "IWM"]:
-                if s not in self.symbols:
-                    self.symbols.append(s)
-                    config.add_to_watchlist(s)
-            self.load_markets()
-            self.notify("Added Major Indices to watchlist.", severity="information")
-
-        elif event.button.id == "preset_crypto_btn":
-            for s in ["BTC/USD", "ETH/USD"]:
-                if s not in self.symbols:
-                    self.symbols.append(s)
-                    config.add_to_watchlist(s)
-            self.load_markets()
-            self.notify("Added Crypto pairs to watchlist.", severity="information")
 
         elif event.button.id == "filter_news_btn":
-            sym = self.query_one("#news_symbol_input", Input).value.upper().strip()
+            inp = self.query_one("#news_symbol_input", Input)
+            sym = inp.value.upper().strip()
             if sym:
                 self.load_news(symbols=sym)
                 self.notify(f"Filtered news for {sym}", severity="information")
@@ -1288,26 +845,6 @@ class DashboardApp(App):
             self.query_one("#news_symbol_input", Input).value = ""
             self.load_news()
             self.notify("Cleared news filter", severity="information")
-
-        elif event.button.id == "clear_log_btn":
-            try:
-                self.query_one("#execution_log_drawer", Log).clear()
-                self.notify("Activity log cleared", severity="information")
-            except Exception:
-                pass
-
-        elif event.button.id == "refresh_portfolio_btn":
-            self.load_portfolio()
-            self.notify("Refreshed portfolio details", severity="information")
-
-        elif event.button.id == "liquidate_all_btn":
-            try:
-                client = get_trading_client()
-                client.close_all_positions()
-                self.notify("Liquidating all open positions...", title="Portfolio Liquidation", severity="warning")
-                self.load_portfolio()
-            except Exception as e:
-                self.notify(f"Liquidate all failed: {e}", severity="error")
                 
         elif event.button.id == "clear_trade_btn":
             self.clear_trade_form()
@@ -1354,8 +891,12 @@ class DashboardApp(App):
                 cur_px = None
                 if tp_str or sl_str:
                     try:
-                        snap_client = get_stock_data_client()
-                        snap = snap_client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=[sym]))
+                        if "/" in sym:
+                            snap_client = get_crypto_data_client()
+                            snap = snap_client.get_crypto_snapshot(CryptoSnapshotRequest(symbol_or_symbols=[sym]))
+                        else:
+                            snap_client = get_stock_data_client()
+                            snap = snap_client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=[sym]))
                         if sym in snap:
                             if snap[sym].latest_trade:
                                 cur_px = float(snap[sym].latest_trade.price)
@@ -1481,39 +1022,56 @@ class DashboardApp(App):
                 self.load_news()
 
     async def action_add_symbol(self, sym: str) -> None:
-        if sym and sym not in self.symbols:
-            try:
-                if "/" in sym:
-                    crypto_client = get_crypto_data_client()
-                    snap = crypto_client.get_crypto_snapshot(CryptoSnapshotRequest(symbol_or_symbols=[sym]))
-                else:
-                    client = get_stock_data_client()
-                    snap = client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=[sym]))
-                if sym not in snap or not snap[sym].latest_trade:
-                    raise ValueError("No trade data found")
-            except Exception:
-                self.notify(f"Ticker '{sym}' not found or no data available.", severity="error")
-                return
+        sym = sym.upper().strip()
+        if not sym:
+            return
+        if sym in self.symbols:
+            self.notify(f"'{sym}' is already in your watchlist.", severity="warning")
+            return
 
-            self.symbols.append(sym)
-            config.add_to_watchlist(sym)
-            self.load_markets()
-            self.notify(f"Added {sym} to watchlist.", severity="information")
-            self.log_event(f"Added {sym} to market watchlist.", "info")
+        is_valid = False
+        try:
+            trading_client = get_trading_client()
+            asset = trading_client.get_asset(sym)
+            if asset and asset.tradable:
+                is_valid = True
+        except Exception:
+            pass
+
+        if not is_valid:
+            try:
+                data_client = get_stock_data_client()
+                snap = data_client.get_stock_snapshot(StockSnapshotRequest(symbol_or_symbols=[sym]))
+                if snap and sym in snap:
+                    is_valid = True
+            except Exception:
+                pass
+
+        if not is_valid:
+            self.notify(f"Ticker '{sym}' not found or not tradable.", severity="error")
+            return
+
+        self.symbols.append(sym)
+        config.add_to_watchlist(sym)
+        self.load_markets()
+        if self.streamer:
+            try:
+                self.streamer.add_symbol(sym)
+            except Exception:
+                pass
+        self.log_event(f"Added {sym} to market watchlist.", "success")
+        self.notify(f"Added {sym} to watchlist.", severity="information")
 
     async def action_remove_symbol(self, sym: str) -> None:
         if sym in self.symbols:
             self.symbols.remove(sym)
             config.remove_from_watchlist(sym)
+            if self.streamer:
+                try:
+                    self.streamer.remove_symbol(sym)
+                except Exception:
+                    pass
             self.load_markets()
             self.notify(f"Removed {sym} from watchlist.", severity="information")
         elif sym:
             self.notify(f"{sym} not in watchlist.", severity="error")
-
-    async def on_asset_selected(self, event: AssetSelected):
-        try:
-            client = get_trading_client()
-            asset = client.get_asset(event.symbol)
-            self.push_screen(AssetInfoModal(asset))
-        except Exception as e:
-            self.notify(f"Could not load asset info: {e}", severity="error")
